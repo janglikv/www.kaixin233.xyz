@@ -1,0 +1,8 @@
+{
+  "name": "www", 
+  "compatibility_date": "2026-01-23",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application" // 开启 SPA 模式
+  }
+}
