@@ -1,8 +1,342 @@
-function App() {
-  return (
-    <div>
-    </div>
-  )
+import { useState, useRef, useEffect } from 'react'
+import { Button, Card, Typography, Space, Slider, Modal, InputNumber, message } from 'antd'
+import { PlayCircleOutlined, PlusOutlined, ExclamationCircleOutlined, ClearOutlined } from '@ant-design/icons'
+
+const { Title, Text } = Typography
+
+// 音符颜色映射 - 正确的 CDEFGAB 顺序
+const NOTE_COLORS = {
+  C: '#ff4d4f',
+  D: '#faad14',
+  E: '#52c41a',
+  F: '#13c2c2',
+  G: '#1890ff',
+  A: '#722ed1',
+  B: '#eb2f96'
 }
 
-export default App
+const NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+const STORAGE_KEY = 'tonejs-notes'
+
+// 音符块组件
+function NoteBlock({ noteIndex, octave, duration, onDoubleClick }) {
+  const getNoteColor = () => {
+    const baseColor = NOTE_COLORS[NOTES[noteIndex]];
+    const opacity = 1 - (octave * 0.08);
+    return { backgroundColor: baseColor, opacity: Math.max(0.2, opacity) };
+  };
+
+  const getNoteWidth = () => {
+    return `${duration * 100}px`;
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+      <div
+        style={{
+          ...getNoteColor(),
+          height: 20,
+          width: getNoteWidth(),
+          borderRadius: 4,
+          cursor: onDoubleClick ? 'pointer' : 'default',
+          transition: onDoubleClick ? 'transform 0.2s' : 'none',
+          ...(onDoubleClick && {
+            onMouseEnter: (e) => e.currentTarget.style.transform = 'scale(1.05)',
+            onMouseLeave: (e) => e.currentTarget.style.transform = 'scale(1)'
+          })
+        }}
+        onDoubleClick={onDoubleClick}
+      />
+      <Text style={{ color: '#fff', fontSize: '12px', marginTop: 4 }}>
+        {NOTES[noteIndex]}{octave}/{duration}s
+      </Text>
+    </div>
+  );
+}
+
+function App() {
+  const [notes, setNotes] = useState(() => {
+    const savedNotes = localStorage.getItem(STORAGE_KEY);
+    if (savedNotes) {
+      try {
+        return JSON.parse(savedNotes);
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  });
+  const synthRef = useRef(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingNote, setEditingNote] = useState(null);
+  const [formData, setFormData] = useState({ noteIndex: 0, octave: 4, duration: 0.2 });
+
+  // 保存数据到本地存储
+  useEffect(() => {
+    if (notes.length > 0 || localStorage.getItem(STORAGE_KEY)) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
+    }
+  }, [notes]);
+
+  const clearAll = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setNotes([]);
+    message.success('已清空所有音符');
+  };
+
+  const initSynth = async () => {
+    if (!window.Tone) {
+      const Tone = await import('tone');
+      window.Tone = Tone;
+    }
+    if (window.Tone.getContext().state !== 'running') {
+      await window.Tone.start();
+    }
+    if (!synthRef.current) {
+      synthRef.current = new window.Tone.Synth().toDestination();
+    }
+  };
+
+  const addNote = () => {
+    setEditingNote(null);
+    setFormData({ noteIndex: 0, octave: 4, duration: 0.2 });
+    setIsModalOpen(true);
+  };
+
+  const editNote = (note) => {
+    setEditingNote(note);
+    setFormData({ noteIndex: note.noteIndex, octave: note.octave, duration: note.duration });
+    setIsModalOpen(true);
+  };
+
+  const handleModalOk = () => {
+    if (editingNote) {
+      setNotes(notes.map(n => n.id === editingNote.id ? { ...n, ...formData } : n));
+    } else {
+      setNotes([...notes, { id: Date.now(), ...formData }]);
+    }
+    setIsModalOpen(false);
+  };
+
+  const handleModalCancel = () => {
+    setIsModalOpen(false);
+    setEditingNote(null);
+  };
+
+  const confirmDeleteNote = (id) => {
+    Modal.confirm({
+      title: '确认删除',
+      icon: <ExclamationCircleOutlined />,
+      content: '确定要删除这个音符吗？',
+      okText: '确定',
+      cancelText: '取消',
+      onOk() {
+        setNotes(notes.filter(n => n.id !== id));
+        handleModalCancel();
+      }
+    });
+  };
+
+  const playAllNotes = async () => {
+    await initSynth();
+    const now = window.Tone.now();
+    notes.forEach((note, index) => {
+      const noteStr = `${NOTES[note.noteIndex]}${note.octave}`;
+      synthRef.current.triggerAttackRelease(noteStr, note.duration, now + index * 0.5);
+    });
+  };
+
+  const playPreviewNote = async () => {
+    await initSynth();
+    synthRef.current.triggerAttackRelease(`${NOTES[formData.noteIndex]}${formData.octave}`, formData.duration);
+  };
+
+  const handleNoteChange = async (value) => {
+    const newFormData = { ...formData, noteIndex: value };
+    setFormData(newFormData);
+    await initSynth();
+    synthRef.current.triggerAttackRelease(`${NOTES[value]}${formData.octave}`, formData.duration);
+  };
+
+  const handleOctaveChange = async (value) => {
+    const newFormData = { ...formData, octave: value };
+    setFormData(newFormData);
+    await initSynth();
+    synthRef.current.triggerAttackRelease(`${NOTES[formData.noteIndex]}${value}`, formData.duration);
+  };
+
+
+
+  return (
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: '100vh',
+      padding: '20px',
+      backgroundColor: '#000000'
+    }}>
+      <Card
+        style={{ width: 800 }}
+        variant="borderless"
+      >
+        <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+          <Title level={2} style={{ margin: 0, textAlign: 'center' }}>
+            <PlayCircleOutlined style={{ marginRight: 8 }} />
+            音符管理器
+          </Title>
+
+          <Space size="middle">
+            <Button
+              type="primary"
+              size="large"
+              onClick={addNote}
+              icon={<PlusOutlined />}
+            >
+              添加音符
+            </Button>
+            <Button
+              type="primary"
+              size="large"
+              onClick={playAllNotes}
+              icon={<PlayCircleOutlined />}
+              disabled={notes.length === 0}
+            >
+              播放全部
+            </Button>
+            <Button
+              danger
+              size="large"
+              onClick={clearAll}
+              icon={<ClearOutlined />}
+            >
+              清空
+            </Button>
+          </Space>
+
+          <div style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 12,
+            width: '100%'
+          }}>
+            {notes.map(note => (
+              <NoteBlock
+                key={note.id}
+                noteIndex={note.noteIndex}
+                octave={note.octave}
+                duration={note.duration}
+                onDoubleClick={() => editNote(note)}
+              />
+            ))}
+          </div>
+
+          {notes.length === 0 && (
+            <Text type="secondary" style={{ textAlign: 'center', display: 'block' }}>
+              点击"添加音符"开始创作
+            </Text>
+          )}
+
+          <Modal
+            title={editingNote ? '编辑音符' : '添加音符'}
+            open={isModalOpen}
+            onOk={handleModalOk}
+            onCancel={handleModalCancel}
+            okText="确定"
+            cancelText="取消"
+            footer={editingNote ? [
+              <Button key="delete" danger onClick={() => confirmDeleteNote(editingNote.id)}>
+                删除
+              </Button>,
+              <Button key="play" icon={<PlayCircleOutlined />} onClick={playPreviewNote}>
+                播放
+              </Button>,
+              <Button key="cancel" onClick={handleModalCancel}>
+                取消
+              </Button>,
+              <Button key="ok" type="primary" onClick={handleModalOk}>
+                确定
+              </Button>
+            ] : [
+              <Button key="play" icon={<PlayCircleOutlined />} onClick={playPreviewNote}>
+                播放
+              </Button>,
+              <Button key="cancel" onClick={handleModalCancel}>
+                取消
+              </Button>,
+              <Button key="ok" type="primary" onClick={handleModalOk}>
+                确定
+              </Button>
+            ]}
+          >
+            <Space orientation="vertical" size="large" style={{ width: '100%' }}>
+              <div>
+                <Text style={{ color: '#fff', display: 'block', marginBottom: 8 }}>
+                  音符: {NOTES[formData.noteIndex]}
+                </Text>
+                <Slider
+                  min={0}
+                  max={6}
+                  value={formData.noteIndex}
+                  onChange={handleNoteChange}
+                  marks={NOTES.reduce((acc, n, i) => ({ ...acc, [i]: n }), {})}
+                  step={1}
+                  tooltip={{ formatter: (value) => NOTES[value] }}
+                />
+              </div>
+
+              <div>
+                <Text style={{ color: '#fff', display: 'block', marginBottom: 8 }}>
+                  音阶: {formData.octave}
+                </Text>
+                <Slider
+                  min={0}
+                  max={9}
+                  value={formData.octave}
+                  onChange={handleOctaveChange}
+                  marks={{ 0: '0', 1: '1', 2: '2', 3: '3', 4: '4', 5: '5', 6: '6', 7: '7', 8: '8', 9: '9' }}
+                  step={1}
+                />
+              </div>
+
+              <div>
+                <Text style={{ color: '#fff', display: 'block', marginBottom: 8 }}>
+                  时长: {formData.duration}s
+                </Text>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Slider
+                    min={0.1}
+                    max={3}
+                    step={0.1}
+                    value={formData.duration}
+                    onChange={(value) => setFormData({ ...formData, duration: value })}
+                    style={{ flex: 1 }}
+                  />
+                  <InputNumber
+                    min={0.1}
+                    value={formData.duration}
+                    onChange={(value) => setFormData({ ...formData, duration: value })}
+                    step={0.1}
+                    style={{ width: 80 }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Text style={{ color: '#fff', display: 'block', marginBottom: 8 }}>预览:</Text>
+                <NoteBlock
+                  noteIndex={formData.noteIndex}
+                  octave={formData.octave}
+                  duration={formData.duration}
+                />
+              </div>
+            </Space>
+          </Modal>
+        </Space>
+      </Card>
+    </div>
+  );
+}
+
+export default App;
