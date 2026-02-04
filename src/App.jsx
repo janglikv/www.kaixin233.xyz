@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
-import { Button, Card, Typography, Space, Slider, Modal, InputNumber } from 'antd'
+import { Button, Card, Typography, Space, Slider, Modal, InputNumber, Checkbox } from 'antd'
 import { PlayCircleOutlined, PlusOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 // 音符颜色映射 - 正确的 CDEFGAB 顺序
 const NOTE_COLORS = {
@@ -19,37 +19,43 @@ const NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
 const STORAGE_KEY = 'tonejs-notes'
 
 // 音符块组件
-function NoteBlock({ noteIndex, octave, duration, onDoubleClick }) {
+function NoteBlock({ noteIndex, octave, duration, onDoubleClick, onHover }) {
   const getNoteColor = () => {
     const baseColor = NOTE_COLORS[NOTES[noteIndex]];
     const opacity = 1 - (octave * 0.08);
     return { backgroundColor: baseColor, opacity: Math.max(0.2, opacity) };
   };
 
-  const getNoteWidth = () => {
-    return `${duration * 100}px`;
+  const getNoteWidth = () => `${duration * 100}px`;
+
+  // 修复后的处理函数
+  const handleMouseEnter = (e) => {
+    e.currentTarget.style.transform = 'scale(1.05)';
+    // ✅ 触发悬停播放逻辑
+    if (onHover) onHover();
+  };
+
+  const handleMouseLeave = (e) => {
+    e.currentTarget.style.transform = 'scale(1)';
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
       <div
+        // 1. 样式归样式
         style={{
           ...getNoteColor(),
           height: 20,
           width: getNoteWidth(),
           borderRadius: 4,
           cursor: onDoubleClick ? 'pointer' : 'default',
-          transition: onDoubleClick ? 'transform 0.2s' : 'none',
-          ...(onDoubleClick && {
-            onMouseEnter: (e) => e.currentTarget.style.transform = 'scale(1.05)',
-            onMouseLeave: (e) => e.currentTarget.style.transform = 'scale(1)'
-          })
+          transition: 'transform 0.2s',
         }}
+        // 2. 事件绑定归事件绑定
         onDoubleClick={onDoubleClick}
+        onMouseEnter={onHover || onDoubleClick ? handleMouseEnter : undefined}
+        onMouseLeave={onHover || onDoubleClick ? handleMouseLeave : undefined}
       />
-      <Text style={{ color: '#fff', fontSize: '12px', marginTop: 4 }}>
-        {NOTES[noteIndex]}{octave}/{duration}s
-      </Text>
     </div>
   );
 }
@@ -71,14 +77,14 @@ function App() {
   const [editingNote, setEditingNote] = useState(null);
   const [formData, setFormData] = useState({ noteIndex: 0, octave: 4, duration: 0.2 });
 
+  const [hoverPlay, setHoverPlay] = useState(false);
+
   // 保存数据到本地存储
   useEffect(() => {
     if (notes.length > 0 || localStorage.getItem(STORAGE_KEY)) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
     }
   }, [notes]);
-
-
 
   const initSynth = async () => {
     if (!window.Tone) {
@@ -93,9 +99,13 @@ function App() {
     }
   };
 
+  const playSingleNote = async (note) => {
+    await initSynth();
+    synthRef.current.triggerAttackRelease(`${NOTES[note.noteIndex]}${note.octave}`, note.duration);
+  };
+
   const addNote = () => {
     setEditingNote(null);
-    setFormData({ noteIndex: 0, octave: 4, duration: 0.2 });
     setIsModalOpen(true);
   };
 
@@ -165,17 +175,25 @@ function App() {
         variant="borderless"
       >
         <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-          <Button
-            type="primary"
-            onClick={addNote}
-            icon={<PlusOutlined />}
-          >
-            添加音符
-          </Button>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Button
+              type="primary"
+              onClick={addNote}
+              icon={<PlusOutlined />}
+            >
+              添加音符
+            </Button>
+            <Checkbox
+              checked={hoverPlay}
+              onChange={(e) => setHoverPlay(e.target.checked)}
+            >
+              悬停播放
+            </Checkbox>
+          </div>
 
           <div style={{
             display: 'flex',
-            gap: 12,
+            gap: 6,
             width: '100%'
           }}>
             {notes.map(note => (
@@ -185,6 +203,7 @@ function App() {
                 octave={note.octave}
                 duration={note.duration}
                 onDoubleClick={() => editNote(note)}
+                onHover={hoverPlay ? () => playSingleNote(note) : null}
               />
             ))}
           </div>
