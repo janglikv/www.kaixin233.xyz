@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { Button, Card, Typography, Space, Slider, Modal, InputNumber, message } from 'antd'
-import { PlayCircleOutlined, PlusOutlined, ExclamationCircleOutlined, ClearOutlined } from '@ant-design/icons'
+import { Button, Card, Typography, Space, Slider, Modal, InputNumber } from 'antd'
+import { PlayCircleOutlined, PlusOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 
 const { Title, Text } = Typography
 
@@ -78,11 +78,7 @@ function App() {
     }
   }, [notes]);
 
-  const clearAll = () => {
-    localStorage.removeItem(STORAGE_KEY);
-    setNotes([]);
-    message.success('已清空所有音符');
-  };
+
 
   const initSynth = async () => {
     if (!window.Tone) {
@@ -137,14 +133,7 @@ function App() {
     });
   };
 
-  const playAllNotes = async () => {
-    await initSynth();
-    const now = window.Tone.now();
-    notes.forEach((note, index) => {
-      const noteStr = `${NOTES[note.noteIndex]}${note.octave}`;
-      synthRef.current.triggerAttackRelease(noteStr, note.duration, now + index * 0.5);
-    });
-  };
+
 
   const playPreviewNote = async () => {
     await initSynth();
@@ -169,55 +158,23 @@ function App() {
 
   return (
     <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      minHeight: '100vh',
       padding: '20px',
-      backgroundColor: '#000000'
     }}>
       <Card
-        style={{ width: 800 }}
+        style={{ width: '100%' }}
         variant="borderless"
       >
         <Space orientation="vertical" size="large" style={{ width: '100%' }}>
-          <Title level={2} style={{ margin: 0, textAlign: 'center' }}>
-            <PlayCircleOutlined style={{ marginRight: 8 }} />
-            音符管理器
-          </Title>
-
-          <Space size="middle">
-            <Button
-              type="primary"
-              size="large"
-              onClick={addNote}
-              icon={<PlusOutlined />}
-            >
-              添加音符
-            </Button>
-            <Button
-              type="primary"
-              size="large"
-              onClick={playAllNotes}
-              icon={<PlayCircleOutlined />}
-              disabled={notes.length === 0}
-            >
-              播放全部
-            </Button>
-            <Button
-              danger
-              size="large"
-              onClick={clearAll}
-              icon={<ClearOutlined />}
-            >
-              清空
-            </Button>
-          </Space>
+          <Button
+            type="primary"
+            onClick={addNote}
+            icon={<PlusOutlined />}
+          >
+            添加音符
+          </Button>
 
           <div style={{
             display: 'flex',
-            flexDirection: 'column',
             gap: 12,
             width: '100%'
           }}>
