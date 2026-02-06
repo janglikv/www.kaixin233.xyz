@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import * as Tone from 'tone';
+import Soundfont from 'soundfont-player';
 import {
   Button,
   Space,
@@ -18,12 +19,13 @@ import {
   Col,
   Input,
 } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
-// Y轴频率范围 0-127 (对应 MIDI 编号)
-const MIDI_RANGE = Array.from({ length: 128 }, (_, i) => 127 - i);
+// Y轴频率范围 21-108 (对应标准 88 键钢琴: A0 - C8)
+// 之前是 0-127，但大多数采样音色在超低/超高音区没有声音
+const MIDI_RANGE = Array.from({ length: 88 }, (_, i) => 108 - i);
 
 const RAINBOW_COLORS = [
   '#ff4d4f', // Red
@@ -36,20 +38,26 @@ const RAINBOW_COLORS = [
   '#f759ab', // Magenta
 ];
 
+const INSTRUMENTS = [
+  { label: '大钢琴 (Grand Piano)', value: 'acoustic_grand_piano' },
+  { label: '电钢琴 (Electric Piano)', value: 'electric_piano_1' },
+  { label: '小提琴 (Violin)', value: 'violin' },
+  { label: '大提琴 (Cello)', value: 'cello' },
+  { label: '长笛 (Flute)', value: 'flute' },
+  { label: '小号 (Trumpet)', value: 'trumpet' },
+  { label: '合成贝司 (Synth Bass)', value: 'synth_bass_1' },
+  { label: '马林巴 (Marimba)', value: 'marimba' },
+  { label: '木琴 (Xylophone)', value: 'xylophone' },
+  { label: '吉他 (Acoustic Guitar)', value: 'acoustic_guitar_nylon' },
+];
+
 const DEFAULT_PRESET = {
   id: 'preset-1',
-  name: '默认音色',
+  name: '大钢琴 (Grand Piano)',
   color: RAINBOW_COLORS[0],
-  duration: '16n',
-  synthConfig: {
-    oscillatorType: 'sine',
-    envelope: {
-      attack: 0.005,
-      decay: 0.1,
-      sustain: 0.3,
-      release: 0.5,
-    }
-  }
+  duration: '8n',
+  instrument: 'acoustic_grand_piano',
+  volume: 1, // 默认音量 100%
 };
 
 const DURATIONS = [
@@ -68,50 +76,131 @@ const DURATION_STEPS = {
   '16n': 1,
 };
 
-const OSCILLATOR_TYPES = ['sine', 'square', 'triangle', 'sawtooth'];
-
 const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
 
 // 将 MIDI 编号转换为音名或频率
 const midiToNote = (midi) => Tone.Frequency(midi, "midi").toNote();
 
 const AppContent = () => {
-  const [nodes, setNodes] = useState([]);
+  const [nodes, setNodes] = useState(() => {
+    const saved = localStorage.getItem('nodes');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
   const [gridSteps, setGridSteps] = useState(64);
   const [cellHeight, setCellHeight] = useState(28);
   const [cellWidth, setCellWidth] = useState(60);
 
-  const [presets, setPresets] = useState([DEFAULT_PRESET]);
-  const [activePresetId, setActivePresetId] = useState(DEFAULT_PRESET.id);
+  // 从 localStorage 读取初始值
+  const [masterVolume, setMasterVolume] = useState(() => {
+    const saved = localStorage.getItem('masterVolume');
+    return saved !== null ? parseFloat(saved) : 1.5;
+  });
 
-  const synthRef = useRef(null);
+  const [presets, setPresets] = useState(() => {
+    const saved = localStorage.getItem('presets');
+    return saved ? JSON.parse(saved) : [DEFAULT_PRESET];
+  });
+
+  const [activePresetId, setActivePresetId] = useState(() => {
+    const saved = localStorage.getItem('activePresetId');
+    // 确保读取的 ID 确实存在于预设列表中，否则回退到默认
+    const savedPresets = localStorage.getItem('presets');
+    const parsedPresets = savedPresets ? JSON.parse(savedPresets) : [DEFAULT_PRESET];
+    return (saved && parsedPresets.some(p => p.id === saved)) ? saved : parsedPresets[0].id;
+  });
+
+  // 撤销/重做历史栈
+  const [, setHistory] = useState([]);
+  const [, setRedoStack] = useState([]);
+  const [hoveredCell, setHoveredCell] = useState(null);
+
+  // 保存设置到 localStorage
+  useEffect(() => {
+    localStorage.setItem('masterVolume', masterVolume);
+    localStorage.setItem('presets', JSON.stringify(presets));
+    localStorage.setItem('activePresetId', activePresetId);
+    localStorage.setItem('nodes', JSON.stringify(nodes));
+  }, [masterVolume, presets, activePresetId, nodes]);
+
+  const instrumentsRef = useRef({});
   const partRef = useRef(null);
   const loopRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const maxStepRef = useRef(0);
+  const nodesRef = useRef(nodes);
 
   const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
+
+  // 使用 ref 追踪 nodes
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  // 记录历史辅助函数
+  const pushToHistory = useCallback(() => {
+    setHistory(prev => [...prev, nodesRef.current]);
+    setRedoStack([]); // 新的操作清空重做栈
+  }, []);
+
+  const performUndo = useCallback(() => {
+    setHistory(prevHistory => {
+      if (prevHistory.length === 0) return prevHistory;
+      const previousNodes = prevHistory[prevHistory.length - 1];
+      const newHistory = prevHistory.slice(0, -1);
+
+      setRedoStack(prevRedo => [...prevRedo, nodesRef.current]);
+      setNodes(previousNodes);
+
+      return newHistory;
+    });
+  }, []);
+
+  const performRedo = useCallback(() => {
+    setRedoStack(prevRedo => {
+      if (prevRedo.length === 0) return prevRedo;
+      const nextNodes = prevRedo[prevRedo.length - 1];
+      const newRedo = prevRedo.slice(0, -1);
+
+      setHistory(prevHistory => [...prevHistory, nodesRef.current]);
+      setNodes(nextNodes);
+
+      return newRedo;
+    });
+  }, []);
+
+  // 键盘监听
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          performRedo();
+        } else {
+          performUndo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [performUndo, performRedo]);
+
+  // 初始滚动到 C4 (MIDI 60)
+  useEffect(() => {
+    if (scrollContainerRef.current) {
+      const c4Index = MIDI_RANGE.indexOf(60);
+      const containerHeight = scrollContainerRef.current.clientHeight;
+      const targetScrollTop = c4Index * cellHeight - containerHeight / 2 + cellHeight / 2;
+      scrollContainerRef.current.scrollTop = targetScrollTop;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // 仅在挂载时运行一次
 
   const updatePreset = (id, updates) => {
     setPresets(prev => prev.map(p => {
       if (p.id !== id) return p;
-
-      let newPreset = { ...p, ...updates };
-
-      if (updates.synthConfig) {
-        newPreset.synthConfig = { ...p.synthConfig, ...updates.synthConfig };
-
-        if (updates.synthConfig.envelope) {
-          newPreset.synthConfig.envelope = {
-            ...p.synthConfig.envelope,
-            ...updates.synthConfig.envelope
-          };
-        }
-      }
-
-      return newPreset;
+      return { ...p, ...updates };
     }));
   };
 
@@ -135,6 +224,26 @@ const AppContent = () => {
     maxStepRef.current = max;
   }, [nodes]);
 
+  const loadInstrument = useCallback(async (instrumentName) => {
+    if (instrumentsRef.current[instrumentName]) return instrumentsRef.current[instrumentName];
+
+    try {
+      const instrument = await Soundfont.instrument(Tone.context.rawContext, instrumentName);
+      instrumentsRef.current[instrumentName] = instrument;
+      return instrument;
+    } catch (e) {
+      console.error('Failed to load instrument', instrumentName, e);
+      return null;
+    }
+  }, []);
+
+  // Preload instruments when presets change
+  useEffect(() => {
+    presets.forEach(p => {
+      if (p.instrument) loadInstrument(p.instrument);
+    });
+  }, [presets, loadInstrument]);
+
   const stopPlay = useCallback(() => {
     Tone.getTransport().stop();
     setIsPlaying(false);
@@ -143,7 +252,7 @@ const AppContent = () => {
 
   // 初始化合成器
   useEffect(() => {
-    synthRef.current = new Tone.PolySynth(Tone.Synth).toDestination();
+    // synthRef removed
 
     loopRef.current = new Tone.Loop((time) => {
       Tone.Draw.schedule(() => {
@@ -161,7 +270,7 @@ const AppContent = () => {
     }, '16n').start(0);
 
     return () => {
-      synthRef.current?.dispose();
+      // synthRef removed
       partRef.current?.dispose();
       loopRef.current?.dispose();
     };
@@ -180,21 +289,25 @@ const AppContent = () => {
         time: node.time,
         note: midiToNote(node.midi),
         duration: node.duration, // Use node's duration (which was copied from preset at creation)
-        velocity: 0.8,
-        config: preset.synthConfig // Use preset's live synth config
+        velocity: (preset.volume ?? 1) * masterVolume, // 使用预设音量 * 总音量
+        instrument: preset.instrument
       };
     });
 
     partRef.current = new Tone.Part((time, value) => {
-      synthRef.current.set({
-        oscillator: { type: value.config.oscillatorType },
-        envelope: value.config.envelope
-      });
-      synthRef.current.triggerAttackRelease(value.note, value.duration, time, value.velocity);
+      const inst = instrumentsRef.current[value.instrument];
+      if (inst) {
+        try {
+          const durationSec = Tone.Time(value.duration).toSeconds();
+          inst.play(value.note, time, { duration: durationSec, gain: value.velocity });
+        } catch (e) {
+          console.error(e);
+        }
+      }
     }, partData).start(0);
 
     partRef.current.loop = false;
-  }, [nodes, presets]); // Depend on presets to update sound immediately
+  }, [nodes, presets, masterVolume]); // Depend on presets and masterVolume to update sound immediately
 
   const togglePlay = async () => {
     if (Tone.getTransport().state !== 'started') {
@@ -215,206 +328,239 @@ const AppContent = () => {
     }
   };
 
-  const addNode = useCallback((midi, step) => {
-    const time = `0:0:${step}`;
-    // Find active preset to get duration default
-    const currentPreset = presets.find(p => p.id === activePresetId) || presets[0];
+  const toggleNode = useCallback((midi, step) => {
+    // 检查是否已存在
+    const currentNodes = nodesRef.current;
+    const existingNode = currentNodes.find(n => n.midi === midi && n.step === step);
 
-    const newNode = {
-      id: generateId(),
-      midi,
-      time,
-      step,
-      presetId: activePresetId, // Link to preset
-      duration: currentPreset.duration, // Copy duration as default
-    };
+    pushToHistory(); // 记录历史
 
-    // 自动扩展网格
-    setGridSteps(prev => {
-      const nodeEnd = step + (DURATION_STEPS[newNode.duration] || 1);
-      if (nodeEnd > prev) {
-        return Math.ceil(nodeEnd / 32) * 32 + 32;
-      }
-      return prev;
-    });
+    if (existingNode) {
+      // 存在 -> 删除
+      setNodes(currentNodes.filter(n => n.id !== existingNode.id));
+    } else {
+      // 不存在 -> 添加
+      const time = `0:0:${step}`;
+      // Find active preset to get duration default
+      const currentPreset = presets.find(p => p.id === activePresetId) || presets[0];
 
-    setNodes(prev => {
-      const filtered = prev.filter(n => !(n.midi === midi && n.step === step));
-      return [...filtered, newNode];
-    });
-  }, [activePresetId, presets]);
+      const newNode = {
+        id: generateId(),
+        midi,
+        time,
+        step,
+        presetId: activePresetId, // Link to preset
+        duration: currentPreset.duration, // Copy duration as default
+      };
+
+      // 自动扩展网格
+      setGridSteps(prev => {
+        const nodeEnd = step + (DURATION_STEPS[newNode.duration] || 1);
+        if (nodeEnd > prev) {
+          return Math.ceil(nodeEnd / 32) * 32 + 32;
+        }
+        return prev;
+      });
+
+      setNodes([...currentNodes, newNode]);
+    }
+  }, [activePresetId, presets, pushToHistory]);
 
   const handleRightClick = useCallback((e, midi, step) => {
     e.preventDefault();
+    pushToHistory();
     setNodes(prev => prev.filter(n => !(n.midi === midi && n.step === step)));
-  }, []);
+  }, [pushToHistory]);
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* 顶部工具栏：预设列表(左) + 播放控制(右) + 预设设置(下) */}
       <div style={{
-        display: 'flex',
-        flexShrink: 0,
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        borderBottom: '1px solid #262626',
-        padding: 20,
-      }}>
-        <div>
-          <Title level={4} style={{ color: '#fff', margin: 0 }}>音频频率图表编辑器</Title>
-          <Text style={{ color: '#555' }}>X: 时间轴 (Steps) | Y: 频率强度 (MIDI 0-127)</Text>
-        </div>
-        <Space>
-          <Popover
-            content={
-              <div style={{ width: 300 }}>
-                <div style={{ marginBottom: 10 }}>
-                  <Text>X轴缩放 (宽度)</Text>
-                  <Row gutter={8}>
-                    <Col span={16}>
-                      <Slider min={10} max={100} value={cellWidth} onChange={setCellWidth} />
-                    </Col>
-                    <Col span={8}>
-                      <InputNumber min={10} max={100} style={{ width: '100%' }} value={cellWidth} onChange={setCellWidth} />
-                    </Col>
-                  </Row>
-                </div>
-                <div style={{ marginBottom: 10 }}>
-                  <Text>Y轴缩放 (高度)</Text>
-                  <Row gutter={8}>
-                    <Col span={16}>
-                      <Slider min={4} max={50} value={cellHeight} onChange={setCellHeight} />
-                    </Col>
-                    <Col span={8}>
-                      <InputNumber min={4} max={50} style={{ width: '100%' }} value={cellHeight} onChange={setCellHeight} />
-                    </Col>
-                  </Row>
-                </div>
-                <Divider style={{ margin: '10px 0' }} />
-                <div>
-                  <Text>整体缩放 (基准倍率)</Text>
-                  <Slider
-                    min={0.5}
-                    max={2}
-                    step={0.1}
-                    defaultValue={1}
-                    tooltip={{ formatter: (v) => `${Math.round(v * 100)}%` }}
-                    onChange={(v) => {
-                      setCellWidth(60 * v);
-                      setCellHeight(28 * v);
-                    }}
-                  />
-                </div>
-              </div>
-            }
-            title="视图设置"
-            trigger="click"
-          >
-            <Button icon={<SettingOutlined />}>视图设置</Button>
-          </Popover>
-          <Button
-            type={isPlaying ? 'default' : 'primary'}
-            icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-            onClick={togglePlay}
-          >
-            {isPlaying ? '暂停' : '播放'}
-          </Button>
-          <Button icon={<StopOutlined />} onClick={stopPlay}>停止</Button>
-          <Button danger onClick={() => setNodes([])} ghost>清空</Button>
-        </Space>
-      </div>
-
-      {/* 音符画笔设置栏 */}
-      <div style={{
-        padding: '12px 20px',
         background: '#141414',
         borderBottom: '1px solid #262626',
         display: 'flex',
-        alignItems: 'center',
-        gap: '24px',
-        flexWrap: 'wrap'
+        flexDirection: 'column',
+        flexShrink: 0,
       }}>
-        <Space>
-          <Text style={{ color: '#aaa' }}>音符预设:</Text>
-          <Select
-            value={activePresetId}
-            onChange={setActivePresetId}
-            options={presets.map(p => ({
-              label: (
-                <Space>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.color }} />
-                  {p.name}
-                </Space>
-              ),
-              value: p.id
-            }))}
-            style={{ width: 160 }}
-          />
-          <Button icon={<PlusOutlined />} onClick={addPreset} size="small" type="dashed">新建</Button>
-        </Space>
+        {/* 第一行：左右布局 */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 16,
+          padding: '14px 20px 14px 20px',
+        }}>
 
-        <Divider type="vertical" style={{ borderColor: '#333' }} />
-
-        <Space>
-          <Input
-            value={activePreset.name}
-            onChange={e => updatePreset(activePresetId, { name: e.target.value })}
-            style={{ width: 100 }}
-            placeholder="预设名称"
-            size="small"
-          />
-          {/* 颜色选择器 (简化版) */}
-          <div style={{ display: 'flex', gap: 4 }}>
-            {RAINBOW_COLORS.map(c => (
+          {/* 左侧：预设列表 */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'nowrap', alignItems: 'center', overflowX: 'auto', flex: 1 }}>
+            {presets.map(p => (
               <div
-                key={c}
-                onClick={() => updatePreset(activePresetId, { color: c })}
+                key={p.id}
+                onClick={() => setActivePresetId(p.id)}
                 style={{
-                  width: 16, height: 16, borderRadius: 2, background: c, cursor: 'pointer',
-                  border: activePreset.color === c ? '2px solid #fff' : '1px solid transparent'
+                  display: 'flex',
+                  alignItems: 'center',
+                  padding: '6px 12px',
+                  background: activePresetId === p.id ? 'rgba(255,255,255,0.08)' : 'transparent',
+                  border: `1px solid ${activePresetId === p.id ? p.color : '#424242'}`,
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  userSelect: 'none',
+                  whiteSpace: 'nowrap'
                 }}
-              />
+              >
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, marginRight: 8 }} />
+                <span style={{ color: activePresetId === p.id ? '#fff' : '#aaa', fontSize: 13 }}>{p.name}</span>
+              </div>
             ))}
+            <Button icon={<PlusOutlined />} onClick={addPreset} type="dashed">新建</Button>
           </div>
-        </Space>
 
-        <Divider type="vertical" style={{ borderColor: '#333' }} />
+          {/* 右侧：操作按钮组 */}
+          <Space>
+            <div style={{ display: 'flex', alignItems: 'center', width: 140, marginRight: 8 }}>
+              <SoundOutlined style={{ color: '#aaa', marginRight: 8 }} />
+              <Slider
+                min={0}
+                max={4}
+                step={0.1}
+                value={masterVolume}
+                onChange={setMasterVolume}
+                style={{ flex: 1 }}
+                tooltip={{ formatter: v => `总音量: ${Math.round(v * 100)}%` }}
+              />
+            </div>
+            <Popover
+              content={
+                <div style={{ width: 300 }}>
+                  <div style={{ marginBottom: 10 }}>
+                    <Text>X轴缩放 (宽度)</Text>
+                    <Row gutter={8}>
+                      <Col span={16}>
+                        <Slider min={10} max={100} value={cellWidth} onChange={setCellWidth} />
+                      </Col>
+                      <Col span={8}>
+                        <InputNumber min={10} max={100} style={{ width: '100%' }} value={cellWidth} onChange={setCellWidth} />
+                      </Col>
+                    </Row>
+                  </div>
+                  <div style={{ marginBottom: 10 }}>
+                    <Text>Y轴缩放 (高度)</Text>
+                    <Row gutter={8}>
+                      <Col span={16}>
+                        <Slider min={4} max={50} value={cellHeight} onChange={setCellHeight} />
+                      </Col>
+                      <Col span={8}>
+                        <InputNumber min={4} max={50} style={{ width: '100%' }} value={cellHeight} onChange={setCellHeight} />
+                      </Col>
+                    </Row>
+                  </div>
+                  <Divider style={{ margin: '10px 0' }} />
+                  <div>
+                    <Text>整体缩放 (基准倍率)</Text>
+                    <Slider
+                      min={0.5}
+                      max={2}
+                      step={0.1}
+                      defaultValue={1}
+                      tooltip={{ formatter: (v) => `${Math.round(v * 100)}%` }}
+                      onChange={(v) => {
+                        setCellWidth(60 * v);
+                        setCellHeight(28 * v);
+                      }}
+                    />
+                  </div>
+                </div>
+              }
+              title="视图设置"
+              trigger="click"
+            >
+              <Button icon={<SettingOutlined />}>视图设置</Button>
+            </Popover>
+            <Divider type="vertical" style={{ borderColor: '#424242' }} />
+            <Button
+              type={isPlaying ? 'default' : 'primary'}
+              icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+              onClick={togglePlay}
+            >
+              {isPlaying ? '暂停' : '播放'}
+            </Button>
+            <Button icon={<StopOutlined />} onClick={stopPlay}>停止</Button>
+            <Button icon={<DeleteOutlined />} onClick={() => {
+              pushToHistory();
+              setNodes([]);
+            }} danger ghost>清空</Button>
+          </Space>
+        </div>
 
-        <Space>
-          <Select
-            value={activePreset.duration}
-            onChange={v => updatePreset(activePresetId, { duration: v })}
-            options={DURATIONS}
-            style={{ width: 100 }}
-            size="small"
-          />
-          <Select
-            value={activePreset.synthConfig.oscillatorType}
-            onChange={v => updatePreset(activePresetId, { synthConfig: { oscillatorType: v } })}
-            options={OSCILLATOR_TYPES.map(t => ({ label: t, value: t }))}
-            style={{ width: 80 }}
-            size="small"
-          />
-        </Space>
-        <Space size="small">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Text style={{ color: '#aaa', fontSize: 10 }}>A:{activePreset.synthConfig.envelope.attack}</Text>
-            <Slider
-              min={0.001} max={1} step={0.01}
-              value={activePreset.synthConfig.envelope.attack}
-              onChange={v => updatePreset(activePresetId, { synthConfig: { envelope: { attack: v } } })}
-              style={{ width: 60 }}
+        <Divider style={{ margin: 0, borderColor: '#262626' }} />
+
+        {/* 第二行：预设详细设置 */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '24px',
+          flexWrap: 'wrap',
+          padding: '6px 20px 10px 20px',
+          // background: '#191919',
+        }}>
+          <Space>
+            <Input
+              value={activePreset.name}
+              onChange={e => updatePreset(activePresetId, { name: e.target.value })}
+              style={{ width: 120 }}
+              placeholder="预设名称"
+              size="small"
             />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <Text style={{ color: '#aaa', fontSize: 10 }}>R:{activePreset.synthConfig.envelope.release}</Text>
-            <Slider
-              min={0.01} max={2} step={0.01}
-              value={activePreset.synthConfig.envelope.release}
-              onChange={v => updatePreset(activePresetId, { synthConfig: { envelope: { release: v } } })}
-              style={{ width: 60 }}
+            {/* 颜色选择器 (简化版) */}
+            <div style={{ display: 'flex', gap: 4 }}>
+              {RAINBOW_COLORS.map(c => (
+                <div
+                  key={c}
+                  onClick={() => updatePreset(activePresetId, { color: c })}
+                  style={{
+                    width: 16, height: 16, borderRadius: 2, background: c, cursor: 'pointer',
+                    border: activePreset.color === c ? '2px solid #fff' : '1px solid transparent'
+                  }}
+                />
+              ))}
+            </div>
+          </Space>
+
+          <Divider type="vertical" style={{ borderColor: '#333' }} />
+
+          <Space>
+            <Select
+              value={activePreset.duration}
+              onChange={v => updatePreset(activePresetId, { duration: v })}
+              options={DURATIONS}
+              style={{ minWidth: 100 }}
+              size="small"
+              popupMatchSelectWidth={false}
             />
-          </div>
-        </Space>
+            <Select
+              value={activePreset.instrument}
+              onChange={v => updatePreset(activePresetId, { instrument: v })}
+              options={INSTRUMENTS}
+              style={{ width: 180 }}
+              size="small"
+              placeholder="选择乐器"
+            />
+            <div style={{ display: 'flex', alignItems: 'center', marginLeft: 8, width: 120 }}>
+              <Text style={{ color: '#aaa', fontSize: 12, marginRight: 4 }}>音量</Text>
+              <Slider
+                min={0}
+                max={4}
+                step={0.1}
+                value={activePreset.volume ?? 1}
+                onChange={v => updatePreset(activePresetId, { volume: v })}
+                style={{ flex: 1 }}
+                tooltip={{ formatter: v => `${Math.round(v * 100)}%` }}
+              />
+            </div>
+          </Space>
+        </div>
       </div>
 
       {/* 坐标图表区域 */}
@@ -453,6 +599,8 @@ const AppContent = () => {
                 color: midi % 12 === 0 ? '#177ddc' : '#888',
                 fontWeight: midi % 12 === 0 ? 'bold' : 'normal',
                 borderBottom: '1px solid #1a1a1a',
+                borderRight: `2px solid ${hoveredCell?.midi === midi ? '#177ddc' : 'transparent'}`,
+                transition: 'border-color 0.1s'
               }}>
                 <span>{midiToNote(midi)}</span>
                 <span>{midi}</span>
@@ -463,18 +611,27 @@ const AppContent = () => {
           </div>
 
           {/* 图表网格 */}
-          <div style={{ flexGrow: 1 }}>
+          <div 
+            style={{ flexGrow: 1 }}
+            onMouseLeave={() => setHoveredCell(null)}
+          >
             {/* 绘图区 */}
             {MIDI_RANGE.map(midi => (
               <div key={midi} style={{ display: 'flex', height: cellHeight }}>
                 {Array.from({ length: gridSteps }).map((_, step) => {
                   const nodeAtPos = nodes.find(n => n.midi === midi && n.step === step);
                   const nodePreset = nodeAtPos ? (presets.find(p => p.id === nodeAtPos.presetId) || presets[0]) : null;
+                  
+                  let bgColor = midi % 12 === 0 ? '#111' : 'transparent';
+                  if (currentStep === step) {
+                    bgColor = 'rgba(23, 125, 220, 0.15)'; // 播放头
+                  }
 
                   return (
                     <div
                       key={step}
-                      onClick={() => addNode(midi, step)}
+                      onMouseDown={() => toggleNode(midi, step)}
+                      onMouseEnter={() => setHoveredCell({ midi, step })}
                       onContextMenu={(e) => handleRightClick(e, midi, step)}
                       style={{
                         width: cellWidth,
@@ -483,9 +640,24 @@ const AppContent = () => {
                         borderBottom: '1px solid #1a1a1a',
                         cursor: 'crosshair',
                         position: 'relative',
-                        background: currentStep === step ? 'rgba(23, 125, 220, 0.05)' : (midi % 12 === 0 ? '#111' : 'transparent'),
+                        background: bgColor,
                       }}
                     >
+                      {hoveredCell?.midi === midi && hoveredCell?.step === step && (
+                        <div
+                          style={{
+                            position: 'absolute',
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            border: `1px solid ${activePreset.color}`,
+                            zIndex: 3,
+                            pointerEvents: 'none',
+                            boxShadow: `inset 0 0 2px ${activePreset.color}`,
+                          }}
+                        />
+                      )}
                       {nodeAtPos && (
                         <div
                           style={{
@@ -516,12 +688,12 @@ const AppContent = () => {
                   textAlign: 'center',
                   height: '30px',
                   background: currentStep === i ? '#111' : 'transparent',
-                  borderTop: '1px solid #262626',
+                  borderTop: `2px solid ${hoveredCell?.step === i ? '#177ddc' : '#262626'}`,
                   borderRight: '1px solid #1a1a1a',
                   fontSize: '10px',
                   lineHeight: '30px',
                   color: i % 4 === 0 ? '#177ddc' : '#555',
-                  transition: 'background 0.1s'
+                  transition: 'all 0.1s'
                 }}>
                   {i}
                 </div>
