@@ -18,8 +18,11 @@ import {
   Row,
   Col,
   Input,
+  Avatar,
+  Switch,
+  Modal,
 } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined, GithubOutlined, RetweetOutlined, EditOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -81,12 +84,19 @@ const generateId = () => Date.now().toString(36) + Math.random().toString(36).su
 // 将 MIDI 编号转换为音名或频率
 const midiToNote = (midi) => Tone.Frequency(midi, "midi").toNote();
 
-const AppContent = () => {
+// 辅助函数：生成带前缀的 localStorage key
+const getStorageKey = (key, spaceId) => {
+  if (!spaceId || spaceId === 'default') return key;
+  return `space_${spaceId}_${key}`;
+};
+
+const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
   const [nodes, setNodes] = useState(() => {
-    const saved = localStorage.getItem('nodes');
+    const saved = localStorage.getItem(getStorageKey('nodes', spaceId));
     return saved ? JSON.parse(saved) : [];
   });
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isLooping, setIsLooping] = useState(false);
   const [currentStep, setCurrentStep] = useState(-1);
   const [gridSteps, setGridSteps] = useState(64);
   const [cellHeight, setCellHeight] = useState(28);
@@ -94,25 +104,27 @@ const AppContent = () => {
 
   // 从 localStorage 读取初始值
   const [masterVolume, setMasterVolume] = useState(() => {
-    const saved = localStorage.getItem('masterVolume');
+    const saved = localStorage.getItem(getStorageKey('masterVolume', spaceId));
     return saved !== null ? parseFloat(saved) : 1.5;
   });
 
   const [bpm, setBpm] = useState(() => {
-    const saved = localStorage.getItem('bpm');
+    const saved = localStorage.getItem(getStorageKey('bpm', spaceId));
     return saved !== null ? parseInt(saved) : 120;
   });
 
   const [presets, setPresets] = useState(() => {
-    const saved = localStorage.getItem('presets');
+    const saved = localStorage.getItem(getStorageKey('presets', spaceId));
     return saved ? JSON.parse(saved) : [DEFAULT_PRESET];
   });
 
   const [activePresetId, setActivePresetId] = useState(() => {
-    const saved = localStorage.getItem('activePresetId');
+    const saved = localStorage.getItem(getStorageKey('activePresetId', spaceId));
     // 确保读取的 ID 确实存在于预设列表中，否则回退到默认
-    const savedPresets = localStorage.getItem('presets');
-    const parsedPresets = savedPresets ? JSON.parse(savedPresets) : [DEFAULT_PRESET];
+    // 注意：这里 presets 可能还是空的或者旧的，因为 useState 的初始化是同步的。
+    // 为了安全，我们在 useEffect 中或渲染时再做一次校验，或者这里先从 localStorage 读取 presets
+    const savedPresetsStr = localStorage.getItem(getStorageKey('presets', spaceId));
+    const parsedPresets = savedPresetsStr ? JSON.parse(savedPresetsStr) : [DEFAULT_PRESET];
     return (saved && parsedPresets.some(p => p.id === saved)) ? saved : parsedPresets[0].id;
   });
 
@@ -121,15 +133,20 @@ const AppContent = () => {
   const [, setRedoStack] = useState([]);
   const [hoveredCell, setHoveredCell] = useState(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState(new Set());
+  
+  // 框选相关状态 (TODO: Implement selection)
+  // const [isSelecting, setIsSelecting] = useState(false);
+  // const [selectionBox, setSelectionBox] = useState(null);
+  // const dragStartRef = useRef(null); // { x, y } relative to grid content
 
   // 保存设置到 localStorage
   useEffect(() => {
-    localStorage.setItem('masterVolume', masterVolume);
-    localStorage.setItem('bpm', bpm);
-    localStorage.setItem('presets', JSON.stringify(presets));
-    localStorage.setItem('activePresetId', activePresetId);
-    localStorage.setItem('nodes', JSON.stringify(nodes));
-  }, [masterVolume, bpm, presets, activePresetId, nodes]);
+    localStorage.setItem(getStorageKey('masterVolume', spaceId), masterVolume);
+    localStorage.setItem(getStorageKey('bpm', spaceId), bpm);
+    localStorage.setItem(getStorageKey('presets', spaceId), JSON.stringify(presets));
+    localStorage.setItem(getStorageKey('activePresetId', spaceId), activePresetId);
+    localStorage.setItem(getStorageKey('nodes', spaceId), JSON.stringify(nodes));
+  }, [masterVolume, bpm, presets, activePresetId, nodes, spaceId]);
 
   const instrumentsRef = useRef({});
   const partRef = useRef(null);
@@ -140,8 +157,14 @@ const AppContent = () => {
   const nodesRef = useRef(nodes);
   const hoveredCellRef = useRef(null);
   const selectedNodeIdsRef = useRef(selectedNodeIds);
+  const isLoopingRef = useRef(isLooping);
 
   const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
+
+  // Update isLoopingRef
+  useEffect(() => {
+    isLoopingRef.current = isLooping;
+  }, [isLooping]);
 
   // Update BPM
   useEffect(() => {
@@ -358,7 +381,13 @@ const AppContent = () => {
         const beat = Math.floor(seconds * bps * 4);
 
         if (maxStepRef.current > 0 && beat >= maxStepRef.current) {
-          stopPlay();
+          if (isLoopingRef.current) {
+             // Restart transport
+             Tone.Transport.position = 0;
+             setCurrentStep(0);
+          } else {
+             stopPlay();
+          }
         } else {
           setCurrentStep(beat);
         }
@@ -493,6 +522,7 @@ const AppContent = () => {
 
           {/* 左侧：预设列表 */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'nowrap', alignItems: 'center', overflowX: 'auto', flex: 1 }}>
+            {headerPrefix}
             {presets.map(p => (
               <div
                 key={p.id}
@@ -532,14 +562,14 @@ const AppContent = () => {
               />
             </div>
             <div style={{ display: 'flex', alignItems: 'center', marginRight: 16 }}>
-              <Text style={{ color: '#aaa', fontSize: 12, marginRight: 8, userSelect: 'none' }}>BPM</Text>
+              <Text style={{ color: '#aaa', fontSize: 12, marginRight: 8, userSelect: 'none' }}>播放速度</Text>
               <InputNumber
                 min={40}
                 max={300}
                 value={bpm}
                 onChange={setBpm}
-                size="small"
-                style={{ width: 60 }}
+                size="middle"
+                style={{ width: 80 }}
               />
             </div>
             <Popover
@@ -590,18 +620,25 @@ const AppContent = () => {
               <Button icon={<SettingOutlined />}>视图设置</Button>
             </Popover>
             <Divider type="vertical" style={{ borderColor: '#424242' }} />
-            <Button
-              type={isPlaying ? 'default' : 'primary'}
-              icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-              onClick={togglePlay}
+            <a 
+              href="https://github.com/janglikv/www.kaixin233.xyz" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              style={{ marginLeft: 8, display: 'flex', alignItems: 'center' }}
             >
-              {isPlaying ? '暂停' : '播放'}
-            </Button>
-            <Button icon={<StopOutlined />} onClick={stopPlay}>停止</Button>
-            <Button icon={<DeleteOutlined />} onClick={() => {
-              pushToHistory();
-              setNodes([]);
-            }} danger ghost>清空</Button>
+              <Avatar 
+                icon={<GithubOutlined />} 
+                size={32}
+                style={{ 
+                  cursor: 'pointer', 
+                  border: '1px solid #424242',
+                  backgroundColor: 'transparent',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              />
+            </a>
           </Space>
         </div>
 
@@ -671,6 +708,29 @@ const AppContent = () => {
               />
             </div>
           </Space>
+
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Switch 
+                    checkedChildren={<RetweetOutlined />} 
+                    unCheckedChildren={<RetweetOutlined />} 
+                    checked={isLooping}
+                    onChange={setIsLooping}
+                />
+                <Text style={{ color: '#aaa', fontSize: 12 }}>循环</Text>
+            </div>
+            <Divider type="vertical" style={{ borderColor: '#333', height: 24 }} />
+            <Space>
+                <Button
+                type={isPlaying ? 'default' : 'primary'}
+                icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                onClick={togglePlay}
+                >
+                {isPlaying ? '暂停' : '播放'}
+                </Button>
+                <Button icon={<StopOutlined />} onClick={stopPlay}>停止</Button>
+            </Space>
+          </div>
         </div>
       </div>
 
@@ -945,6 +1005,130 @@ const AppContent = () => {
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+const AppContent = () => {
+  const [spaces, setSpaces] = useState(() => {
+    const saved = localStorage.getItem('spaces');
+    return saved ? JSON.parse(saved) : [{ id: 'default', name: '默认空间' }];
+  });
+
+  const [activeSpaceId, setActiveSpaceId] = useState(() => {
+    const saved = localStorage.getItem('activeSpaceId');
+    return saved || 'default';
+  });
+
+  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+
+  useEffect(() => {
+    localStorage.setItem('spaces', JSON.stringify(spaces));
+  }, [spaces]);
+
+  useEffect(() => {
+    localStorage.setItem('activeSpaceId', activeSpaceId);
+  }, [activeSpaceId]);
+
+  const handleSpaceChange = (value) => {
+    if (value === 'ADD_NEW_SPACE') {
+      const newSpaceId = generateId();
+      const newSpaceName = `空间 ${spaces.length + 1}`;
+      const newSpace = { id: newSpaceId, name: newSpaceName };
+      setSpaces([...spaces, newSpace]);
+      setActiveSpaceId(newSpaceId);
+    } else {
+      setActiveSpaceId(value);
+    }
+  };
+
+  const startRename = () => {
+    const currentSpace = spaces.find(s => s.id === activeSpaceId);
+    if (currentSpace) {
+      setRenameValue(currentSpace.name);
+      setIsRenameModalOpen(true);
+    }
+  };
+
+  const handleRenameOk = () => {
+    if (!renameValue.trim()) return;
+    setSpaces(prev => prev.map(s => {
+      if (s.id === activeSpaceId) {
+        return { ...s, name: renameValue };
+      }
+      return s;
+    }));
+    setIsRenameModalOpen(false);
+  };
+
+  const handleDeleteSpace = () => {
+    if (spaces.length <= 1) {
+        return; 
+    }
+    const newSpaces = spaces.filter(s => s.id !== activeSpaceId);
+    setSpaces(newSpaces);
+    setActiveSpaceId(newSpaces[0].id);
+    setIsRenameModalOpen(false);
+  };
+
+  return (
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+        <SpaceWorkspace 
+            key={activeSpaceId} 
+            spaceId={activeSpaceId}
+            headerPrefix={
+                <div style={{ display: 'flex', alignItems: 'center', marginRight: 16 }}>
+                    <Select
+                        value={activeSpaceId}
+                        onChange={handleSpaceChange}
+                        style={{ width: 140 }}
+                        variant="filled"
+                        options={[
+                            ...spaces.map(s => ({ label: s.name, value: s.id })),
+                            { label: '+ 添加空间', value: 'ADD_NEW_SPACE' }
+                        ]}
+                    />
+                    <Button 
+                        type="text" 
+                        icon={<SettingOutlined />} 
+                        size="small"
+                        onClick={startRename}
+                        style={{ marginLeft: 4, color: '#888' }}
+                    />
+                </div>
+            }
+        />
+        <Modal
+            title="空间设置"
+            open={isRenameModalOpen}
+            onOk={handleRenameOk}
+            onCancel={() => setIsRenameModalOpen(false)}
+            okText="保存"
+            cancelText="取消"
+            footer={[
+                spaces.length > 1 && (
+                    <Button key="delete" danger onClick={handleDeleteSpace} style={{ float: 'left' }}>
+                        删除空间
+                    </Button>
+                ),
+                <Button key="cancel" onClick={() => setIsRenameModalOpen(false)}>
+                    取消
+                </Button>,
+                <Button key="submit" type="primary" onClick={handleRenameOk}>
+                    保存
+                </Button>,
+            ]}
+        >
+            <div style={{ marginBottom: 8 }}>空间名称</div>
+            <Input 
+                value={renameValue} 
+                onChange={e => setRenameValue(e.target.value)} 
+                onPressEnter={handleRenameOk}
+                autoFocus
+                placeholder="请输入空间名称"
+            />
+        </Modal>
     </div>
   );
 };
