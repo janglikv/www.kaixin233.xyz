@@ -98,6 +98,11 @@ const AppContent = () => {
     return saved !== null ? parseFloat(saved) : 1.5;
   });
 
+  const [bpm, setBpm] = useState(() => {
+    const saved = localStorage.getItem('bpm');
+    return saved !== null ? parseInt(saved) : 120;
+  });
+
   const [presets, setPresets] = useState(() => {
     const saved = localStorage.getItem('presets');
     return saved ? JSON.parse(saved) : [DEFAULT_PRESET];
@@ -115,28 +120,43 @@ const AppContent = () => {
   const [, setHistory] = useState([]);
   const [, setRedoStack] = useState([]);
   const [hoveredCell, setHoveredCell] = useState(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set());
 
   // 保存设置到 localStorage
   useEffect(() => {
     localStorage.setItem('masterVolume', masterVolume);
+    localStorage.setItem('bpm', bpm);
     localStorage.setItem('presets', JSON.stringify(presets));
     localStorage.setItem('activePresetId', activePresetId);
     localStorage.setItem('nodes', JSON.stringify(nodes));
-  }, [masterVolume, presets, activePresetId, nodes]);
+  }, [masterVolume, bpm, presets, activePresetId, nodes]);
 
   const instrumentsRef = useRef({});
   const partRef = useRef(null);
   const loopRef = useRef(null);
   const scrollContainerRef = useRef(null);
+  const xAxisScrollRef = useRef(null);
   const maxStepRef = useRef(0);
   const nodesRef = useRef(nodes);
+  const hoveredCellRef = useRef(null);
+  const selectedNodeIdsRef = useRef(selectedNodeIds);
 
   const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
+
+  // Update BPM
+  useEffect(() => {
+    Tone.Transport.bpm.value = bpm;
+  }, [bpm]);
 
   // 使用 ref 追踪 nodes
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
+
+  // Sync selectedNodeIdsRef
+  useEffect(() => {
+    selectedNodeIdsRef.current = selectedNodeIds;
+  }, [selectedNodeIds]);
 
   // 记录历史辅助函数
   const pushToHistory = useCallback(() => {
@@ -181,10 +201,86 @@ const AppContent = () => {
           performUndo();
         }
       }
+      
+      // Delete node on Delete or Backspace
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Prevent back navigation if focus is not in an input
+        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+            e.preventDefault();
+        }
+
+        const currentSelected = selectedNodeIdsRef.current;
+        const currentNodes = nodesRef.current;
+
+        // 1. 优先删除选中的节点
+        if (currentSelected.size > 0) {
+          pushToHistory();
+          setNodes(currentNodes.filter(n => !currentSelected.has(n.id)));
+          setSelectedNodeIds(new Set()); // 清空选中
+          return;
+        }
+
+        // 2. 如果没有选中，删除鼠标悬停的节点
+        if (hoveredCellRef.current) {
+          const { midi, step } = hoveredCellRef.current;
+          const existingNode = currentNodes.find(n => n.midi === midi && n.step === step);
+          
+          if (existingNode) {
+            pushToHistory();
+            setNodes(currentNodes.filter(n => n.id !== existingNode.id));
+          }
+        }
+      }
+
+      // Adjust duration: Cmd + Left/Right
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        const currentSelected = selectedNodeIdsRef.current;
+        if (currentSelected.size > 0) {
+            pushToHistory();
+            const currentNodes = nodesRef.current;
+            const isLengthen = e.key === 'ArrowRight';
+            
+            // DURATIONS is ordered 1n, 2n, 4n, 8n, 16n
+            // Index 0 is Longest. Index 4 is Shortest.
+            // Right (Lengthen) -> Decrease Index
+            // Left (Shorten) -> Increase Index
+            
+            const newNodes = currentNodes.map(node => {
+                if (!currentSelected.has(node.id)) return node;
+                
+                const currentIndex = DURATIONS.findIndex(d => d.value === node.duration);
+                if (currentIndex === -1) return node;
+
+                let newIndex;
+                if (isLengthen) {
+                    newIndex = Math.max(0, currentIndex - 1);
+                } else {
+                    newIndex = Math.min(DURATIONS.length - 1, currentIndex + 1);
+                }
+
+                return { ...node, duration: DURATIONS[newIndex].value };
+            });
+            
+            setNodes(newNodes);
+            
+            // Handle grid expansion if lengthened
+            if (isLengthen) {
+                // Calculate max end
+                const maxEnd = Math.max(...newNodes.map(n => n.step + (DURATION_STEPS[n.duration] || 1)), 0);
+                 setGridSteps(prev => {
+                    if (maxEnd > prev) {
+                         return Math.ceil(maxEnd / 32) * 32 + 32;
+                    }
+                    return prev;
+                 });
+            }
+        }
+      }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [performUndo, performRedo]);
+  }, [performUndo, performRedo, pushToHistory]);
 
   // 初始滚动到 C4 (MIDI 60)
   useEffect(() => {
@@ -326,6 +422,9 @@ const AppContent = () => {
     if (scrollWidth - (scrollLeft + clientWidth) < 100) {
       setGridSteps(prev => prev + 32);
     }
+    if (xAxisScrollRef.current) {
+      xAxisScrollRef.current.scrollLeft = scrollLeft;
+    }
   };
 
   const toggleNode = useCallback((midi, step) => {
@@ -333,37 +432,38 @@ const AppContent = () => {
     const currentNodes = nodesRef.current;
     const existingNode = currentNodes.find(n => n.midi === midi && n.step === step);
 
-    pushToHistory(); // 记录历史
-
     if (existingNode) {
-      // 存在 -> 删除
-      setNodes(currentNodes.filter(n => n.id !== existingNode.id));
-    } else {
-      // 不存在 -> 添加
-      const time = `0:0:${step}`;
-      // Find active preset to get duration default
-      const currentPreset = presets.find(p => p.id === activePresetId) || presets[0];
+      // 存在 -> 什么都不做 (点击只负责添加，删除改为 Delete 键)
+      return;
+    } 
+    
+    // 不存在 -> 添加
+    pushToHistory(); // 记录历史
+    
+    const time = `0:0:${step}`;
+    // Find active preset to get duration default
+    const currentPreset = presets.find(p => p.id === activePresetId) || presets[0];
 
-      const newNode = {
-        id: generateId(),
-        midi,
-        time,
-        step,
-        presetId: activePresetId, // Link to preset
-        duration: currentPreset.duration, // Copy duration as default
-      };
+    const newNode = {
+      id: generateId(),
+      midi,
+      time,
+      step,
+      presetId: activePresetId, // Link to preset
+      duration: currentPreset.duration, // Copy duration as default
+    };
 
-      // 自动扩展网格
-      setGridSteps(prev => {
-        const nodeEnd = step + (DURATION_STEPS[newNode.duration] || 1);
-        if (nodeEnd > prev) {
-          return Math.ceil(nodeEnd / 32) * 32 + 32;
-        }
-        return prev;
-      });
+    // 自动扩展网格
+    setGridSteps(prev => {
+      const nodeEnd = step + (DURATION_STEPS[newNode.duration] || 1);
+      if (nodeEnd > prev) {
+        return Math.ceil(nodeEnd / 32) * 32 + 32;
+      }
+      return prev;
+    });
 
-      setNodes([...currentNodes, newNode]);
-    }
+    setNodes([...currentNodes, newNode]);
+    return newNode.id;
   }, [activePresetId, presets, pushToHistory]);
 
   const handleRightClick = useCallback((e, midi, step) => {
@@ -429,6 +529,17 @@ const AppContent = () => {
                 onChange={setMasterVolume}
                 style={{ flex: 1 }}
                 tooltip={{ formatter: v => `总音量: ${Math.round(v * 100)}%` }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', marginRight: 16 }}>
+              <Text style={{ color: '#aaa', fontSize: 12, marginRight: 8, userSelect: 'none' }}>BPM</Text>
+              <InputNumber
+                min={40}
+                max={300}
+                value={bpm}
+                onChange={setBpm}
+                size="small"
+                style={{ width: 60 }}
               />
             </div>
             <Popover
@@ -563,133 +674,266 @@ const AppContent = () => {
         </div>
       </div>
 
-      {/* 坐标图表区域 */}
-      <div
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
-        className="no-scrollbar"
-        style={{
-          border: '1px solid #262626',
-          background: '#0d0d0d',
-          position: 'relative',
-          borderRadius: '4px',
-          overflow: 'auto',
-          flex: 1
-        }}
-      >
-        <div style={{ display: 'flex', width: `${gridSteps * cellWidth + 80}px` }}>
-          {/* Y轴刻度 */}
-          <div style={{
-            width: '80px',
-            flexShrink: 0,
-            position: 'sticky',
-            left: 0,
-            zIndex: 10,
-            background: '#141414',
-            borderRight: '1px solid #262626'
-          }}>
-            {MIDI_RANGE.map(midi => (
-              <div key={midi} style={{
-                height: cellHeight,
-                padding: '0 8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: '9px',
-                color: midi % 12 === 0 ? '#177ddc' : '#888',
-                fontWeight: midi % 12 === 0 ? 'bold' : 'normal',
-                borderBottom: '1px solid #1a1a1a',
-                borderRight: `2px solid ${hoveredCell?.midi === midi ? '#177ddc' : 'transparent'}`,
-                transition: 'border-color 0.1s'
-              }}>
-                <span>{midiToNote(midi)}</span>
-                <span>{midi}</span>
-              </div>
-            ))}
-            {/* X轴占位 */}
-            <div style={{ height: '30px', background: '#141414' }}></div>
-          </div>
+      {/* 坐标图表区域 + 底部 X 轴 */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #262626', borderRadius: '4px', background: '#0d0d0d' }}>
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="no-scrollbar"
+          style={{
+            position: 'relative',
+            overflow: 'auto',
+            flex: 1
+          }}
+        >
+          <div style={{ display: 'flex', width: `${gridSteps * cellWidth + 80}px` }}>
+            {/* Y轴刻度 */}
+            <div style={{
+              width: '80px',
+              flexShrink: 0,
+              position: 'sticky',
+              left: 0,
+              zIndex: 10,
+              background: '#141414',
+              borderRight: '1px solid #262626'
+            }}>
+              {MIDI_RANGE.map(midi => (
+                <div key={midi} style={{
+                  height: cellHeight,
+                  padding: '0 8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  fontSize: '9px',
+                  color: midi % 12 === 0 ? '#177ddc' : '#888',
+                  fontWeight: midi % 12 === 0 ? 'bold' : 'normal',
+                  borderBottom: '1px solid #1a1a1a',
+                  borderRight: `2px solid ${hoveredCell?.midi === midi ? '#177ddc' : 'transparent'}`,
+                  transition: 'border-color 0.1s'
+                }}>
+                  <span>{midiToNote(midi)}</span>
+                  <span>{midi}</span>
+                </div>
+              ))}
+            </div>
 
-          {/* 图表网格 */}
-          <div 
-            style={{ flexGrow: 1 }}
-            onMouseLeave={() => setHoveredCell(null)}
-          >
-            {/* 绘图区 */}
-            {MIDI_RANGE.map(midi => (
-              <div key={midi} style={{ display: 'flex', height: cellHeight }}>
-                {Array.from({ length: gridSteps }).map((_, step) => {
-                  const nodeAtPos = nodes.find(n => n.midi === midi && n.step === step);
-                  const nodePreset = nodeAtPos ? (presets.find(p => p.id === nodeAtPos.presetId) || presets[0]) : null;
+            {/* 图表网格 */}
+            <div 
+              style={{ 
+                flexGrow: 1, 
+                position: 'relative',
+                height: MIDI_RANGE.length * cellHeight,
+                backgroundImage: `
+                  linear-gradient(to right, #1a1a1a 1px, transparent 1px),
+                  linear-gradient(to bottom, #1a1a1a 1px, transparent 1px),
+                  linear-gradient(to bottom, #111 ${cellHeight}px, transparent ${cellHeight}px)
+                `,
+                backgroundSize: `
+                  ${cellWidth}px ${cellHeight}px,
+                  ${cellWidth}px ${cellHeight}px,
+                  100% ${cellHeight * 12}px
+                `,
+                backgroundAttachment: 'local',
+                cursor: 'crosshair',
+              }}
+              onClick={(e) => {
+                // const x = e.clientX - rect.left; 
+                const offsetX = e.nativeEvent.offsetX;
+                const offsetY = e.nativeEvent.offsetY;
+                
+                const step = Math.floor(offsetX / cellWidth);
+                const midiIndex = Math.floor(offsetY / cellHeight);
+                const midi = MIDI_RANGE[midiIndex];
+
+                if (step >= 0 && step < gridSteps && midi !== undefined) {
+                  const existingNode = nodes.find(n => n.midi === midi && n.step === step);
                   
-                  let bgColor = midi % 12 === 0 ? '#111' : 'transparent';
-                  if (currentStep === step) {
-                    bgColor = 'rgba(23, 125, 220, 0.15)'; // 播放头
+                  if (existingNode) {
+                    const isSelected = selectedNodeIds.has(existingNode.id);
+                    if (isSelected) {
+                      // 已选中 -> 取消选中
+                      setSelectedNodeIds(prev => {
+                        const next = new Set(prev);
+                        next.delete(existingNode.id);
+                        return next;
+                      });
+                    } else {
+                      // 未选中 -> 处理选中逻辑
+                      if (e.metaKey || e.ctrlKey) {
+                        setSelectedNodeIds(prev => new Set(prev).add(existingNode.id));
+                      } else {
+                        setSelectedNodeIds(new Set([existingNode.id]));
+                      }
+                    }
+                  } else {
+                    // Add node
+                    const newNodeId = toggleNode(midi, step);
+                    if (newNodeId) {
+                      if (e.metaKey || e.ctrlKey) {
+                        setSelectedNodeIds(prev => new Set(prev).add(newNodeId));
+                      } else {
+                        setSelectedNodeIds(new Set([newNodeId]));
+                      }
+                    }
                   }
+                }
+              }}
+              onMouseMove={(e) => {
+                const offsetX = e.nativeEvent.offsetX;
+                const offsetY = e.nativeEvent.offsetY;
+                
+                const step = Math.floor(offsetX / cellWidth);
+                const midiIndex = Math.floor(offsetY / cellHeight);
+                const midi = MIDI_RANGE[midiIndex];
 
-                  return (
-                    <div
-                      key={step}
-                      onMouseDown={() => toggleNode(midi, step)}
-                      onMouseEnter={() => setHoveredCell({ midi, step })}
-                      onContextMenu={(e) => handleRightClick(e, midi, step)}
+                if (step >= 0 && step < gridSteps && midi !== undefined) {
+                  const cell = { midi, step };
+                  setHoveredCell(cell);
+                  hoveredCellRef.current = cell;
+                } else {
+                  setHoveredCell(null);
+                  hoveredCellRef.current = null;
+                }
+              }}
+              onMouseLeave={() => {
+                setHoveredCell(null);
+                hoveredCellRef.current = null;
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                const offsetX = e.nativeEvent.offsetX;
+                const offsetY = e.nativeEvent.offsetY;
+                
+                const step = Math.floor(offsetX / cellWidth);
+                const midiIndex = Math.floor(offsetY / cellHeight);
+                const midi = MIDI_RANGE[midiIndex];
+                
+                if (step >= 0 && step < gridSteps && midi !== undefined) {
+                  handleRightClick(e, midi, step);
+                }
+              }}
+            >
+              {/* 播放头高亮列 */}
+              {currentStep >= 0 && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    left: currentStep * cellWidth,
+                    top: 0,
+                    bottom: 0,
+                    width: cellWidth,
+                    background: 'rgba(23, 125, 220, 0.15)',
+                    pointerEvents: 'none',
+                    zIndex: 1
+                  }}
+                />
+              )}
+
+              {/* Hover 高亮 */}
+              {hoveredCell && (
+                 <div
+                  style={{
+                    position: 'absolute',
+                    left: hoveredCell.step * cellWidth,
+                    top: MIDI_RANGE.indexOf(hoveredCell.midi) * cellHeight,
+                    width: cellWidth,
+                    height: cellHeight,
+                    border: '1px solid #fff',
+                    pointerEvents: 'none',
+                    zIndex: 3,
+                  }}
+                />
+              )}
+
+              {/* 音符节点 */}
+              {nodes.map(node => {
+                const nodePreset = presets.find(p => p.id === node.presetId) || presets[0];
+                const midiIndex = MIDI_RANGE.indexOf(node.midi);
+                if (midiIndex === -1) return null;
+                const durationSteps = DURATION_STEPS[node.duration] || 1;
+                const isSelected = selectedNodeIds.has(node.id);
+
+                return (
+                  <div
+                    key={node.id}
+                    style={{
+                      position: 'absolute',
+                      left: node.step * cellWidth + 1,
+                      top: midiIndex * cellHeight + 1,
+                      width: cellWidth - 2, // 恢复为单个单元格宽度
+                      height: cellHeight - 1,
+                      background: nodePreset.color,
+                      borderRadius: '2px',
+                      zIndex: 2,
+                      opacity: 1,
+                      pointerEvents: 'none',
+                      boxShadow: 'none',
+                    }}
+                  >
+                    {/* 选中标识：小白点 */}
+                    {isSelected && (
+                      <div 
+                        style={{
+                          position: 'absolute',
+                          left: '6px',
+                          top: '50%',
+                          transform: 'translateY(-50%)',
+                          width: '6px',
+                          height: '6px',
+                          background: '#fff',
+                          borderRadius: '50%',
+                          boxShadow: '0 0 4px rgba(0,0,0,0.5)',
+                          zIndex: 3
+                        }}
+                      />
+                    )}
+                    {/* 扩展下划线：显示音长 */}
+                    <div 
                       style={{
-                        width: cellWidth,
-                        flexShrink: 0,
-                        borderRight: '1px solid #1a1a1a',
-                        borderBottom: '1px solid #1a1a1a',
-                        cursor: 'crosshair',
-                        position: 'relative',
-                        background: bgColor,
+                        position: 'absolute',
+                        bottom: 0,
+                        left: 0,
+                        width: durationSteps * cellWidth - 2,
+                        height: '3px',
+                        background: nodePreset.color,
+                        borderRadius: '1px',
+                        boxShadow: 'none',
                       }}
-                    >
-                      {hoveredCell?.midi === midi && hoveredCell?.step === step && (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            top: 0,
-                            left: 0,
-                            right: 0,
-                            bottom: 0,
-                            border: `1px solid ${activePreset.color}`,
-                            zIndex: 3,
-                            pointerEvents: 'none',
-                            boxShadow: `inset 0 0 2px ${activePreset.color}`,
-                          }}
-                        />
-                      )}
-                      {nodeAtPos && (
-                        <div
-                          style={{
-                            position: 'absolute',
-                            top: '1px',
-                            left: '1px',
-                            right: '1px',
-                            bottom: '1px',
-                            background: nodePreset ? nodePreset.color : '#177ddc',
-                            borderRadius: '1px',
-                            zIndex: 2,
-                            boxShadow: `0 0 4px ${nodePreset ? nodePreset.color : '#177ddc'}`,
-                            opacity: 0.8
-                          }}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-
-            {/* X轴刻度 (Move to bottom) */}
-            <div style={{ display: 'flex', position: 'sticky', bottom: 0, zIndex: 9, background: '#141414' }}>
-              {Array.from({ length: gridSteps }).map((_, i) => (
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+        
+        {/* 固定底部的 X 轴容器 */}
+        <div 
+           ref={xAxisScrollRef}
+           className="no-scrollbar"
+           style={{ 
+             height: '30px', 
+             background: '#141414',
+             borderTop: '1px solid #262626',
+             display: 'flex',
+             overflow: 'hidden', // Hide scrollbar, controlled by JS
+             flexShrink: 0
+           }}
+        >
+          {/* 左下角空块 (对应 YAxis 宽度) */}
+          <div style={{ width: 80, flexShrink: 0, background: '#141414', borderRight: '1px solid #262626' }} />
+           
+          {/* X轴刻度 */}
+          <div style={{ display: 'flex' }}> 
+             {Array.from({ length: gridSteps }).map((_, i) => (
                 <div key={i} style={{
                   width: cellWidth,
+                  flexShrink: 0,
                   textAlign: 'center',
                   height: '30px',
                   background: currentStep === i ? '#111' : 'transparent',
-                  borderTop: `2px solid ${hoveredCell?.step === i ? '#177ddc' : '#262626'}`,
                   borderRight: '1px solid #1a1a1a',
+                  borderTop: `2px solid ${hoveredCell?.step === i ? '#177ddc' : 'transparent'}`,
                   fontSize: '10px',
                   lineHeight: '30px',
                   color: i % 4 === 0 ? '#177ddc' : '#555',
@@ -698,7 +942,6 @@ const AppContent = () => {
                   {i}
                 </div>
               ))}
-            </div>
           </div>
         </div>
       </div>
