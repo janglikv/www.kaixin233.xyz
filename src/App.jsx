@@ -9,8 +9,6 @@ import {
   Divider,
   Select,
   Slider,
-  Drawer,
-  Form,
   ConfigProvider,
   theme,
   InputNumber,
@@ -22,7 +20,7 @@ import {
   Switch,
   Modal,
 } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined, GithubOutlined, RetweetOutlined, EditOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined, GithubOutlined, RetweetOutlined, EditOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -158,8 +156,31 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
   const hoveredCellRef = useRef(null);
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const isLoopingRef = useRef(isLooping);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const mouseDownPosRef = useRef(null);
 
   const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
+
+  // Fullscreen listener
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((e) => {
+        console.error(`Error attempting to enable fullscreen: ${e.message}`);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
 
   // Update isLoopingRef
   useEffect(() => {
@@ -619,7 +640,11 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
             >
               <Button icon={<SettingOutlined />}>视图设置</Button>
             </Popover>
-            <Divider type="vertical" style={{ borderColor: '#424242' }} />
+            <Button 
+              icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} 
+              onClick={toggleFullscreen}
+            />
+            <Divider orientation="vertical" style={{ borderColor: '#424242' }} />
             <a 
               href="https://github.com/janglikv/www.kaixin233.xyz" 
               target="_blank" 
@@ -676,7 +701,7 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
             </div>
           </Space>
 
-          <Divider type="vertical" style={{ borderColor: '#333' }} />
+          <Divider orientation="vertical" style={{ borderColor: '#333' }} />
 
           <Space>
             <Select
@@ -719,7 +744,7 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
                 />
                 <Text style={{ color: '#aaa', fontSize: 12 }}>循环</Text>
             </div>
-            <Divider type="vertical" style={{ borderColor: '#333', height: 24 }} />
+            <Divider orientation="vertical" style={{ borderColor: '#333', height: 24 }} />
             <Space>
                 <Button
                 type={isPlaying ? 'default' : 'primary'}
@@ -796,7 +821,19 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
                 backgroundAttachment: 'local',
                 cursor: 'crosshair',
               }}
+              onMouseDown={(e) => {
+                mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+              }}
               onClick={(e) => {
+                // Check for drag vs click
+                if (mouseDownPosRef.current) {
+                    const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
+                    const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
+                    if (dx > 5 || dy > 5) {
+                        return; // It was a drag, ignore click
+                    }
+                }
+
                 // const x = e.clientX - rect.left; 
                 const offsetX = e.nativeEvent.offsetX;
                 const offsetY = e.nativeEvent.offsetY;
