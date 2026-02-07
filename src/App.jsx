@@ -20,7 +20,7 @@ import {
   Switch,
   Modal,
 } from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined, GithubOutlined, RetweetOutlined, EditOutlined, FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
+import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined, GithubOutlined, RetweetOutlined, EditOutlined, FullscreenOutlined, FullscreenExitOutlined, ArrowUpOutlined, ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
@@ -132,10 +132,10 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
   const [hoveredCell, setHoveredCell] = useState(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState(new Set());
   
-  // 框选相关状态 (TODO: Implement selection)
-  // const [isSelecting, setIsSelecting] = useState(false);
-  // const [selectionBox, setSelectionBox] = useState(null);
-  // const dragStartRef = useRef(null); // { x, y } relative to grid content
+  // 框选相关状态
+  const [selectionBox, setSelectionBox] = useState(null); // { x, y, width, height } relative to grid content
+  const dragStartRef = useRef(null); // { x, y } relative to grid content
+  const selectionBoxRef = useRef(null); // Ref to keep track of box in event listeners
 
   // 保存设置到 localStorage
   useEffect(() => {
@@ -234,9 +234,127 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
     });
   }, []);
 
+  const handleMoveNodes = useCallback((deltaStep, deltaMidi) => {
+    const currentSelected = selectedNodeIdsRef.current;
+    if (currentSelected.size === 0) return;
+
+    const currentNodes = nodesRef.current;
+    const selectedNodes = currentNodes.filter(n => currentSelected.has(n.id));
+
+    // Boundary checks (Group move logic: if any node hits the wall, stop all)
+    const canMoveStep = selectedNodes.every(n => n.step + deltaStep >= 0);
+    
+    // Check MIDI bounds (21 to 108)
+    const canMoveMidi = selectedNodes.every(n => {
+        const newMidi = n.midi + deltaMidi;
+        return newMidi >= 21 && newMidi <= 108;
+    });
+
+    if (canMoveStep && canMoveMidi) {
+        pushToHistory();
+
+        const newNodes = currentNodes.map(n => {
+            if (!currentSelected.has(n.id)) return n;
+            const newStep = n.step + deltaStep;
+            return {
+                ...n,
+                step: newStep,
+                midi: n.midi + deltaMidi,
+                time: `0:0:${newStep}` 
+            };
+        });
+
+        setNodes(newNodes);
+
+        // Handle grid expansion if moving right
+        if (deltaStep > 0) {
+             const maxEnd = Math.max(...newNodes.map(n => n.step + (DURATION_STEPS[n.duration] || 1)), 0);
+             setGridSteps(prev => {
+                if (maxEnd > prev) {
+                     return Math.ceil(maxEnd / 32) * 32 + 32;
+                }
+                return prev;
+             });
+        }
+    }
+  }, [pushToHistory]);
+
+  const handleDeleteNodes = useCallback(() => {
+    const currentSelected = selectedNodeIdsRef.current;
+    const currentNodes = nodesRef.current;
+
+    // 1. 优先删除选中的节点
+    if (currentSelected.size > 0) {
+      pushToHistory();
+      setNodes(currentNodes.filter(n => !currentSelected.has(n.id)));
+      setSelectedNodeIds(new Set()); // 清空选中
+      return;
+    }
+
+    // 2. 如果没有选中，删除鼠标悬停的节点
+    if (hoveredCellRef.current) {
+      const { midi, step } = hoveredCellRef.current;
+      const existingNode = currentNodes.find(n => n.midi === midi && n.step === step);
+      
+      if (existingNode) {
+        pushToHistory();
+        setNodes(currentNodes.filter(n => n.id !== existingNode.id));
+      }
+    }
+  }, [pushToHistory]);
+
+  const handleChangeDuration = useCallback((valueOrDirection) => {
+        const currentSelected = selectedNodeIdsRef.current;
+        if (currentSelected.size > 0) {
+            pushToHistory();
+            const currentNodes = nodesRef.current;
+            
+            // Check if input is direction ('left'/'right') or direct value
+            const isDirectional = valueOrDirection === 'left' || valueOrDirection === 'right';
+            const isLengthen = valueOrDirection === 'right';
+
+            const newNodes = currentNodes.map(node => {
+                if (!currentSelected.has(node.id)) return node;
+                
+                let newDuration;
+                if (isDirectional) {
+                    const currentIndex = DURATIONS.findIndex(d => d.value === node.duration);
+                    if (currentIndex === -1) return node.duration;
+
+                    let newIndex;
+                    if (isLengthen) {
+                        newIndex = Math.max(0, currentIndex - 1);
+                    } else {
+                        newIndex = Math.min(DURATIONS.length - 1, currentIndex + 1);
+                    }
+                    newDuration = DURATIONS[newIndex].value;
+                } else {
+                    newDuration = valueOrDirection;
+                }
+
+                return { ...node, duration: newDuration };
+            });
+            
+            setNodes(newNodes);
+            
+            // Handle grid expansion if lengthened or set to longer duration
+            // Simply recalculate max end for safety
+            const maxEnd = Math.max(...newNodes.map(n => n.step + (DURATION_STEPS[n.duration] || 1)), 0);
+             setGridSteps(prev => {
+                if (maxEnd > prev) {
+                     return Math.ceil(maxEnd / 32) * 32 + 32;
+                }
+                return prev;
+             });
+        }
+  }, [pushToHistory]);
+
   // 键盘监听
   useEffect(() => {
     const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setSelectedNodeIds(new Set());
+      }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) {
@@ -251,80 +369,37 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
         // Prevent back navigation if focus is not in an input
         if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
             e.preventDefault();
-        }
-
-        const currentSelected = selectedNodeIdsRef.current;
-        const currentNodes = nodesRef.current;
-
-        // 1. 优先删除选中的节点
-        if (currentSelected.size > 0) {
-          pushToHistory();
-          setNodes(currentNodes.filter(n => !currentSelected.has(n.id)));
-          setSelectedNodeIds(new Set()); // 清空选中
-          return;
-        }
-
-        // 2. 如果没有选中，删除鼠标悬停的节点
-        if (hoveredCellRef.current) {
-          const { midi, step } = hoveredCellRef.current;
-          const existingNode = currentNodes.find(n => n.midi === midi && n.step === step);
-          
-          if (existingNode) {
-            pushToHistory();
-            setNodes(currentNodes.filter(n => n.id !== existingNode.id));
-          }
+            handleDeleteNodes();
         }
       }
 
-      // Adjust duration: Cmd + Left/Right
-      if ((e.metaKey || e.ctrlKey) && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
-        e.preventDefault();
-        const currentSelected = selectedNodeIdsRef.current;
-        if (currentSelected.size > 0) {
-            pushToHistory();
-            const currentNodes = nodesRef.current;
-            const isLengthen = e.key === 'ArrowRight';
-            
-            // DURATIONS is ordered 1n, 2n, 4n, 8n, 16n
-            // Index 0 is Longest. Index 4 is Shortest.
-            // Right (Lengthen) -> Decrease Index
-            // Left (Shorten) -> Increase Index
-            
-            const newNodes = currentNodes.map(node => {
-                if (!currentSelected.has(node.id)) return node;
-                
-                const currentIndex = DURATIONS.findIndex(d => d.value === node.duration);
-                if (currentIndex === -1) return node;
-
-                let newIndex;
-                if (isLengthen) {
-                    newIndex = Math.max(0, currentIndex - 1);
-                } else {
-                    newIndex = Math.min(DURATIONS.length - 1, currentIndex + 1);
-                }
-
-                return { ...node, duration: DURATIONS[newIndex].value };
-            });
-            
-            setNodes(newNodes);
-            
-            // Handle grid expansion if lengthened
-            if (isLengthen) {
-                // Calculate max end
-                const maxEnd = Math.max(...newNodes.map(n => n.step + (DURATION_STEPS[n.duration] || 1)), 0);
-                 setGridSteps(prev => {
-                    if (maxEnd > prev) {
-                         return Math.ceil(maxEnd / 32) * 32 + 32;
-                    }
-                    return prev;
-                 });
+      // Move selected nodes with Arrow keys
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+        // Ignore if typing in an input
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        
+        if (e.metaKey || e.ctrlKey) {
+            // Adjust duration: Cmd + Left/Right
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+                e.preventDefault();
+                handleChangeDuration(e.key === 'ArrowRight' ? 'right' : 'left');
             }
+        } else {
+             // Move nodes
+             e.preventDefault();
+             let deltaStep = 0;
+             let deltaMidi = 0;
+             if (e.key === 'ArrowLeft') deltaStep = -1;
+             if (e.key === 'ArrowRight') deltaStep = 1;
+             if (e.key === 'ArrowUp') deltaMidi = 1;
+             if (e.key === 'ArrowDown') deltaMidi = -1;
+             handleMoveNodes(deltaStep, deltaMidi);
         }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [performUndo, performRedo, pushToHistory]);
+  }, [performUndo, performRedo, handleMoveNodes, handleDeleteNodes, handleChangeDuration]);
 
   // 初始滚动到 C4 (MIDI 60)
   useEffect(() => {
@@ -823,6 +898,80 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
               }}
               onMouseDown={(e) => {
                 mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+                
+                // Box Selection Logic
+                if (e.button !== 0) return; // Left click only
+
+                const startX = e.nativeEvent.offsetX;
+                const startY = e.nativeEvent.offsetY;
+                
+                dragStartRef.current = { x: startX, y: startY };
+
+                const getSelectionRect = (x1, y1, x2, y2) => ({
+                    x: Math.min(x1, x2),
+                    y: Math.min(y1, y2),
+                    width: Math.abs(x2 - x1),
+                    height: Math.abs(y2 - y1)
+                });
+
+                const handleWindowMouseMove = (moveEvent) => {
+                    if (!dragStartRef.current) return;
+                    
+                    const dx = moveEvent.clientX - mouseDownPosRef.current.x;
+                    const dy = moveEvent.clientY - mouseDownPosRef.current.y;
+                    
+                    const currentX = startX + dx;
+                    const currentY = startY + dy;
+                    
+                    const rect = getSelectionRect(startX, startY, currentX, currentY);
+                    
+                    if (rect.width > 5 || rect.height > 5) {
+                        setSelectionBox(rect);
+                        selectionBoxRef.current = rect;
+                    }
+                };
+
+                const handleWindowMouseUp = (upEvent) => {
+                    const finalBox = selectionBoxRef.current;
+                    
+                    if (finalBox) {
+                        const newSelected = new Set();
+                        
+                        if (upEvent.metaKey || upEvent.ctrlKey || upEvent.shiftKey) {
+                            selectedNodeIds.forEach(id => newSelected.add(id));
+                        }
+
+                        nodes.forEach(node => {
+                            const nodeX = node.step * cellWidth;
+                            const midiIndex = MIDI_RANGE.indexOf(node.midi);
+                            const nodeY = midiIndex * cellHeight;
+                            // Only check intersection with the head of the node (single cell width)
+                            const nodeHeadW = cellWidth; 
+                            const nodeH = cellHeight;
+
+                            if (
+                                nodeX < finalBox.x + finalBox.width &&
+                                nodeX + nodeHeadW > finalBox.x &&
+                                nodeY < finalBox.y + finalBox.height &&
+                                nodeY + nodeH > finalBox.y
+                            ) {
+                                newSelected.add(node.id);
+                            }
+                        });
+
+                        setSelectedNodeIds(newSelected);
+                    }
+                    
+                    setSelectionBox(null);
+                    selectionBoxRef.current = null;
+                    dragStartRef.current = null;
+                    
+                    window.removeEventListener('mousemove', handleWindowMouseMove);
+                    window.removeEventListener('mouseup', handleWindowMouseUp);
+                };
+
+                window.addEventListener('mousemove', handleWindowMouseMove);
+                window.addEventListener('mouseup', handleWindowMouseUp);
               }}
               onClick={(e) => {
                 // Check for drag vs click
@@ -942,6 +1091,23 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
                 />
               )}
 
+              {/* Box Selection Visual */}
+              {selectionBox && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        left: selectionBox.x,
+                        top: selectionBox.y,
+                        width: selectionBox.width,
+                        height: selectionBox.height,
+                        background: 'rgba(23, 125, 220, 0.1)',
+                        border: '1px solid #177ddc',
+                        pointerEvents: 'none',
+                        zIndex: 100
+                    }}
+                />
+              )}
+
               {/* 音符节点 */}
               {nodes.map(node => {
                 const nodePreset = presets.find(p => p.id === node.presetId) || presets[0];
@@ -1042,6 +1208,49 @@ const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
           </div>
         </div>
       </div>
+      {/* 底部悬浮操作栏 */}
+      {selectedNodeIds.size > 0 && (
+        <div style={{
+            position: 'fixed',
+            bottom: 30,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 100,
+            boxShadow: '0 6px 16px 0 rgba(0, 0, 0, 0.4)',
+            borderRadius: 8,
+        }}>
+            <Card size="small" bodyStyle={{ padding: '8px 16px' }} bordered={false} style={{ background: '#1f1f1f' }}>
+                <Space size={16}>
+                    <Space size={4}>
+                         <Button icon={<ArrowLeftOutlined />} size="small" onClick={() => handleMoveNodes(-1, 0)} />
+                         <div style={{ display: 'flex', flexDirection: 'column' }}>
+                             <Button icon={<ArrowUpOutlined />} size="small" onClick={() => handleMoveNodes(0, 1)} style={{ marginBottom: 2 }} />
+                             <Button icon={<ArrowDownOutlined />} size="small" onClick={() => handleMoveNodes(0, -1)} />
+                         </div>
+                         <Button icon={<ArrowRightOutlined />} size="small" onClick={() => handleMoveNodes(1, 0)} />
+                    </Space>
+                    
+                    <Divider type="vertical" />
+                    
+                    <Select 
+                        size="small" 
+                        style={{ width: 100 }} 
+                        placeholder="节拍"
+                        value={nodes.find(n => selectedNodeIds.has(n.id))?.duration} 
+                        onChange={(val) => handleChangeDuration(val)}
+                        options={DURATIONS} 
+                        popupMatchSelectWidth={false}
+                    />
+
+                    <Divider type="vertical" />
+
+                    <Button danger type="primary" icon={<DeleteOutlined />} size="small" onClick={handleDeleteNodes}>
+                        删除 ({selectedNodeIds.size})
+                    </Button>
+                </Space>
+            </Card>
+        </div>
+      )}
     </div>
   );
 };
