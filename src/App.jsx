@@ -1,1396 +1,662 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import * as Tone from 'tone';
-import Soundfont from 'soundfont-player';
-import {
-  Button,
-  Space,
-  Card,
-  Typography,
-  Divider,
-  Select,
-  Slider,
-  ConfigProvider,
-  theme,
-  InputNumber,
-  Popover,
-  Row,
-  Col,
-  Input,
-  Avatar,
-  Switch,
-  Modal,
-} from 'antd';
-import { PlayCircleOutlined, PauseCircleOutlined, StopOutlined, DeleteOutlined, SettingOutlined, PlusOutlined, SoundOutlined, GithubOutlined, RetweetOutlined, EditOutlined, FullscreenOutlined, FullscreenExitOutlined, ArrowUpOutlined, ArrowDownOutlined, ArrowLeftOutlined, ArrowRightOutlined } from '@ant-design/icons';
+import { useEffect, useRef, useState } from 'react'
+import * as PIXI from 'pixi.js'
+import heroPng from './assets/hero.png'
+import enemyPng from './assets/enemy.png'
 
-const { Title, Text } = Typography;
+const hmrVersion = (() => {
+  if (!import.meta.hot) return 0
+  const nextVersion = (import.meta.hot.data.pixiAppVersion ?? 0) + 1
+  import.meta.hot.data.pixiAppVersion = nextVersion
+  return nextVersion
+})()
 
-// Y轴频率范围 21-108 (对应标准 88 键钢琴: A0 - C8)
-// 之前是 0-127，但大多数采样音色在超低/超高音区没有声音
-const MIDI_RANGE = Array.from({ length: 88 }, (_, i) => 108 - i);
+// 从 enemy.png 透明通道连通域识别出的 20 个主要敌机区域坐标。
+const ENEMY_FRAMES = [
+  { x: 874, y: 54, w: 249, h: 170 },
+  { x: 1218, y: 56, w: 226, h: 174 },
+  { x: 324, y: 60, w: 226, h: 160 },
+  { x: 580, y: 60, w: 246, h: 158 },
+  { x: 66, y: 64, w: 218, h: 155 },
+  { x: 931, y: 256, w: 259, h: 194 },
+  { x: 651, y: 268, w: 231, h: 180 },
+  { x: 58, y: 275, w: 261, h: 166 },
+  { x: 1258, y: 275, w: 227, h: 163 },
+  { x: 369, y: 282, w: 237, h: 153 },
+  { x: 1011, y: 489, w: 215, h: 162 },
+  { x: 1267, y: 494, w: 227, h: 150 },
+  { x: 400, y: 496, w: 247, h: 152 },
+  { x: 705, y: 499, w: 259, h: 146 },
+  { x: 82, y: 500, w: 268, h: 150 },
+  { x: 656, y: 725, w: 249, h: 193 },
+  { x: 77, y: 729, w: 233, h: 208 },
+  { x: 372, y: 729, w: 254, h: 199 },
+  { x: 1232, y: 733, w: 266, h: 201 },
+  { x: 929, y: 741, w: 251, h: 192 },
+]
 
-const RAINBOW_COLORS = [
-  '#ff4d4f', // Red
-  '#ff7a45', // Orange
-  '#ffc53d', // Yellow
-  '#73d13d', // Green
-  '#36cfc9', // Cyan
-  '#4096ff', // Blue
-  '#9254de', // Purple
-  '#f759ab', // Magenta
-];
+// 行进管理：达到对应里程后刷出指定编号敌军（编号与资料库一致，从 1 开始）。
+const ROUTE_PLAN = []
 
-const INSTRUMENTS = [
-  { label: '大钢琴 (Grand Piano)', value: 'acoustic_grand_piano' },
-  { label: '电钢琴 (Electric Piano)', value: 'electric_piano_1' },
-  { label: '小提琴 (Violin)', value: 'violin' },
-  { label: '大提琴 (Cello)', value: 'cello' },
-  { label: '长笛 (Flute)', value: 'flute' },
-  { label: '小号 (Trumpet)', value: 'trumpet' },
-  { label: '合成贝司 (Synth Bass)', value: 'synth_bass_1' },
-  { label: '马林巴 (Marimba)', value: 'marimba' },
-  { label: '木琴 (Xylophone)', value: 'xylophone' },
-  { label: '吉他 (Acoustic Guitar)', value: 'acoustic_guitar_nylon' },
-];
+export default function App() {
+  const containerRef = useRef(null)
+  const libraryContainerRef = useRef(null)
+  const [showLibrary, setShowLibrary] = useState(false)
 
-const DEFAULT_PRESET = {
-  id: 'preset-1',
-  name: '大钢琴 (Grand Piano)',
-  color: RAINBOW_COLORS[0],
-  duration: '8n',
-  instrument: 'acoustic_grand_piano',
-  volume: 1, // 默认音量 100%
-};
-
-const DURATIONS = [
-  { label: '全音符 (1n)', value: '1n' },
-  { label: '二分音符 (2n)', value: '2n' },
-  { label: '四分音符 (4n)', value: '4n' },
-  { label: '八分音符 (8n)', value: '8n' },
-  { label: '十六分音符 (16n)', value: '16n' },
-];
-
-const DURATION_STEPS = {
-  '1n': 16,
-  '2n': 8,
-  '4n': 4,
-  '8n': 2,
-  '16n': 1,
-};
-
-const generateId = () => Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
-
-// 将 MIDI 编号转换为音名或频率
-const midiToNote = (midi) => Tone.Frequency(midi, "midi").toNote();
-
-// 辅助函数：生成带前缀的 localStorage key
-const getStorageKey = (key, spaceId) => {
-  if (!spaceId || spaceId === 'default') return key;
-  return `space_${spaceId}_${key}`;
-};
-
-const SpaceWorkspace = ({ spaceId, headerPrefix }) => {
-  const [nodes, setNodes] = useState(() => {
-    const saved = localStorage.getItem(getStorageKey('nodes', spaceId));
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isLooping, setIsLooping] = useState(false);
-  const [currentStep, setCurrentStep] = useState(-1);
-  const [gridSteps, setGridSteps] = useState(64);
-  const [cellHeight, setCellHeight] = useState(28);
-  const [cellWidth, setCellWidth] = useState(60);
-
-  // 从 localStorage 读取初始值
-  const [masterVolume, setMasterVolume] = useState(() => {
-    const saved = localStorage.getItem(getStorageKey('masterVolume', spaceId));
-    return saved !== null ? parseFloat(saved) : 1.5;
-  });
-
-  const [bpm, setBpm] = useState(() => {
-    const saved = localStorage.getItem(getStorageKey('bpm', spaceId));
-    return saved !== null ? parseInt(saved) : 120;
-  });
-
-  const [presets, setPresets] = useState(() => {
-    const saved = localStorage.getItem(getStorageKey('presets', spaceId));
-    return saved ? JSON.parse(saved) : [DEFAULT_PRESET];
-  });
-
-  const [activePresetId, setActivePresetId] = useState(() => {
-    const saved = localStorage.getItem(getStorageKey('activePresetId', spaceId));
-    // 确保读取的 ID 确实存在于预设列表中，否则回退到默认
-    // 注意：这里 presets 可能还是空的或者旧的，因为 useState 的初始化是同步的。
-    // 为了安全，我们在 useEffect 中或渲染时再做一次校验，或者这里先从 localStorage 读取 presets
-    const savedPresetsStr = localStorage.getItem(getStorageKey('presets', spaceId));
-    const parsedPresets = savedPresetsStr ? JSON.parse(savedPresetsStr) : [DEFAULT_PRESET];
-    return (saved && parsedPresets.some(p => p.id === saved)) ? saved : parsedPresets[0].id;
-  });
-
-  // 撤销/重做历史栈
-  const [, setHistory] = useState([]);
-  const [, setRedoStack] = useState([]);
-  const [hoveredCell, setHoveredCell] = useState(null);
-  const [selectedNodeIds, setSelectedNodeIds] = useState(new Set());
-  
-  // 框选相关状态
-  const [selectionBox, setSelectionBox] = useState(null); // { x, y, width, height } relative to grid content
-  const dragStartRef = useRef(null); // { x, y } relative to grid content
-  const selectionBoxRef = useRef(null); // Ref to keep track of box in event listeners
-
-  // 保存设置到 localStorage
   useEffect(() => {
-    localStorage.setItem(getStorageKey('masterVolume', spaceId), masterVolume);
-    localStorage.setItem(getStorageKey('bpm', spaceId), bpm);
-    localStorage.setItem(getStorageKey('presets', spaceId), JSON.stringify(presets));
-    localStorage.setItem(getStorageKey('activePresetId', spaceId), activePresetId);
-    localStorage.setItem(getStorageKey('nodes', spaceId), JSON.stringify(nodes));
-  }, [masterVolume, bpm, presets, activePresetId, nodes, spaceId]);
+    if (!containerRef.current) return undefined
 
-  const instrumentsRef = useRef({});
-  const partRef = useRef(null);
-  const loopRef = useRef(null);
-  const scrollContainerRef = useRef(null);
-  const xAxisScrollRef = useRef(null);
-  const maxStepRef = useRef(0);
-  const nodesRef = useRef(nodes);
-  const hoveredCellRef = useRef(null);
-  const selectedNodeIdsRef = useRef(selectedNodeIds);
-  const isLoopingRef = useRef(isLooping);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const mouseDownPosRef = useRef(null);
+    let destroyed = false
+    let initialized = false
+    const app = new PIXI.Application()
+    const pressedKeys = new Set()
 
-  const activePreset = presets.find(p => p.id === activePresetId) || presets[0];
+    let hero = null
+    const heroSpeed = 280
+    const enemySprites = []
+    const enemyMoveSpeed = 120
+    const bulletSprites = []
+    const bulletSpeed = 640
+    const fireInterval = 0.8
+    let fireElapsed = 0
+    const blinkInterval = 0.1
+    const blinkTotalToggles = 6
+    let isBlinking = false
+    let blinkElapsed = 0
+    let blinkToggleCount = 0
+    const alphaMasks = new WeakMap()
+    const sharedPoint = new PIXI.Point()
+    let resizeHandler = null
+    const starParticles = []
+    const routePlan = [...ROUTE_PLAN].sort((a, b) => a.meter - b.meter)
+    const travelSpeedMps = 48
+    let traveledMeters = 0
+    let routeCursor = 0
+    let lastSpawnInfo = '无'
+    const formationMeter = 100
+    const formationEnemyId = 15
+    const formationCount = 5
+    let formationTriggered = false
 
-  // Fullscreen listener
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
-  }, []);
+    const loadImageElement = (url) => new Promise((resolve, reject) => {
+      const image = new Image()
+      image.onload = () => resolve(image)
+      image.onerror = (event) => reject(new Error(`Failed to load image: ${url} ${String(event)}`))
+      image.src = url
+    })
 
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((e) => {
-        console.error(`Error attempting to enable fullscreen: ${e.message}`);
-      });
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
+    const buildAlphaMaskFromImage = (image, frame) => {
+      const width = Math.floor(frame.width)
+      const height = Math.floor(frame.height)
+      if (width <= 0 || height <= 0) return null
+
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const context = canvas.getContext('2d', { willReadFrequently: true })
+      if (!context) return null
+      context.clearRect(0, 0, width, height)
+      context.drawImage(
+        image,
+        frame.x,
+        frame.y,
+        frame.width,
+        frame.height,
+        0,
+        0,
+        width,
+        height,
+      )
+      const pixels = context.getImageData(0, 0, width, height).data
+
+      const alpha = new Uint8Array(width * height)
+      for (let i = 0; i < width * height; i += 1) {
+        alpha[i] = pixels[i * 4 + 3]
       }
-    }
-  };
-
-  // Update isLoopingRef
-  useEffect(() => {
-    isLoopingRef.current = isLooping;
-  }, [isLooping]);
-
-  // Update BPM
-  useEffect(() => {
-    Tone.Transport.bpm.value = bpm;
-  }, [bpm]);
-
-  // 使用 ref 追踪 nodes
-  useEffect(() => {
-    nodesRef.current = nodes;
-  }, [nodes]);
-
-  // Sync selectedNodeIdsRef
-  useEffect(() => {
-    selectedNodeIdsRef.current = selectedNodeIds;
-  }, [selectedNodeIds]);
-
-  // 记录历史辅助函数
-  const pushToHistory = useCallback(() => {
-    setHistory(prev => [...prev, nodesRef.current]);
-    setRedoStack([]); // 新的操作清空重做栈
-  }, []);
-
-  const performUndo = useCallback(() => {
-    setHistory(prevHistory => {
-      if (prevHistory.length === 0) return prevHistory;
-      const previousNodes = prevHistory[prevHistory.length - 1];
-      const newHistory = prevHistory.slice(0, -1);
-
-      setRedoStack(prevRedo => [...prevRedo, nodesRef.current]);
-      setNodes(previousNodes);
-
-      return newHistory;
-    });
-  }, []);
-
-  const performRedo = useCallback(() => {
-    setRedoStack(prevRedo => {
-      if (prevRedo.length === 0) return prevRedo;
-      const nextNodes = prevRedo[prevRedo.length - 1];
-      const newRedo = prevRedo.slice(0, -1);
-
-      setHistory(prevHistory => [...prevHistory, nodesRef.current]);
-      setNodes(nextNodes);
-
-      return newRedo;
-    });
-  }, []);
-
-  const handleMoveNodes = useCallback((deltaStep, deltaMidi) => {
-    const currentSelected = selectedNodeIdsRef.current;
-    if (currentSelected.size === 0) return;
-
-    const currentNodes = nodesRef.current;
-    const selectedNodes = currentNodes.filter(n => currentSelected.has(n.id));
-
-    // Boundary checks (Group move logic: if any node hits the wall, stop all)
-    const canMoveStep = selectedNodes.every(n => n.step + deltaStep >= 0);
-    
-    // Check MIDI bounds (21 to 108)
-    const canMoveMidi = selectedNodes.every(n => {
-        const newMidi = n.midi + deltaMidi;
-        return newMidi >= 21 && newMidi <= 108;
-    });
-
-    if (canMoveStep && canMoveMidi) {
-        pushToHistory();
-
-        const newNodes = currentNodes.map(n => {
-            if (!currentSelected.has(n.id)) return n;
-            const newStep = n.step + deltaStep;
-            return {
-                ...n,
-                step: newStep,
-                midi: n.midi + deltaMidi,
-                time: `0:0:${newStep}` 
-            };
-        });
-
-        setNodes(newNodes);
-
-        // Handle grid expansion if moving right
-        if (deltaStep > 0) {
-             const maxEnd = Math.max(...newNodes.map(n => n.step + (DURATION_STEPS[n.duration] || 1)), 0);
-             setGridSteps(prev => {
-                if (maxEnd > prev) {
-                     return Math.ceil(maxEnd / 32) * 32 + 32;
-                }
-                return prev;
-             });
-        }
-    }
-  }, [pushToHistory]);
-
-  const handleDeleteNodes = useCallback(() => {
-    const currentSelected = selectedNodeIdsRef.current;
-    const currentNodes = nodesRef.current;
-
-    // 1. 优先删除选中的节点
-    if (currentSelected.size > 0) {
-      pushToHistory();
-      setNodes(currentNodes.filter(n => !currentSelected.has(n.id)));
-      setSelectedNodeIds(new Set()); // 清空选中
-      return;
+      return { width, height, alpha }
     }
 
-    // 2. 如果没有选中，删除鼠标悬停的节点
-    if (hoveredCellRef.current) {
-      const { midi, step } = hoveredCellRef.current;
-      const existingNode = currentNodes.find(n => n.midi === midi && n.step === step);
-      
-      if (existingNode) {
-        pushToHistory();
-        setNodes(currentNodes.filter(n => n.id !== existingNode.id));
-      }
+    const isOpaqueAtWorldPoint = (sprite, mask, worldX, worldY) => {
+      if (!mask) return false
+      const local = sprite.toLocal(sharedPoint.set(worldX, worldY))
+      const x = Math.floor(local.x + sprite.anchor.x * mask.width)
+      const y = Math.floor(local.y + sprite.anchor.y * mask.height)
+      if (x < 0 || x >= mask.width || y < 0 || y >= mask.height) return false
+      return mask.alpha[y * mask.width + x] > 20
     }
-  }, [pushToHistory]);
 
-  const handleChangeDuration = useCallback((valueOrDirection) => {
-        const currentSelected = selectedNodeIdsRef.current;
-        if (currentSelected.size > 0) {
-            pushToHistory();
-            const currentNodes = nodesRef.current;
-            
-            // Check if input is direction ('left'/'right') or direct value
-            const isDirectional = valueOrDirection === 'left' || valueOrDirection === 'right';
-            const isLengthen = valueOrDirection === 'right';
+    const pixelPerfectCollides = (spriteA, spriteB) => {
+      const maskA = alphaMasks.get(spriteA)
+      const maskB = alphaMasks.get(spriteB)
+      if (!maskA || !maskB) return false
 
-            const newNodes = currentNodes.map(node => {
-                if (!currentSelected.has(node.id)) return node;
-                
-                let newDuration;
-                if (isDirectional) {
-                    const currentIndex = DURATIONS.findIndex(d => d.value === node.duration);
-                    if (currentIndex === -1) return node.duration;
+      const a = spriteA.getBounds()
+      const b = spriteB.getBounds()
+      const left = Math.max(a.x, b.x)
+      const top = Math.max(a.y, b.y)
+      const right = Math.min(a.x + a.width, b.x + b.width)
+      const bottom = Math.min(a.y + a.height, b.y + b.height)
+      if (right <= left || bottom <= top) return false
 
-                    let newIndex;
-                    if (isLengthen) {
-                        newIndex = Math.max(0, currentIndex - 1);
-                    } else {
-                        newIndex = Math.min(DURATIONS.length - 1, currentIndex + 1);
-                    }
-                    newDuration = DURATIONS[newIndex].value;
-                } else {
-                    newDuration = valueOrDirection;
-                }
+      const startX = Math.floor(left)
+      const startY = Math.floor(top)
+      const endX = Math.ceil(right)
+      const endY = Math.ceil(bottom)
 
-                return { ...node, duration: newDuration };
-            });
-            
-            setNodes(newNodes);
-            
-            // Handle grid expansion if lengthened or set to longer duration
-            // Simply recalculate max end for safety
-            const maxEnd = Math.max(...newNodes.map(n => n.step + (DURATION_STEPS[n.duration] || 1)), 0);
-             setGridSteps(prev => {
-                if (maxEnd > prev) {
-                     return Math.ceil(maxEnd / 32) * 32 + 32;
-                }
-                return prev;
-             });
-        }
-  }, [pushToHistory]);
-
-  // 键盘监听
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        setSelectedNodeIds(new Set());
-      }
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) {
-          performRedo();
-        } else {
-          performUndo();
-        }
-      }
-      
-      // Delete node on Delete or Backspace
-      if (e.key === 'Delete' || e.key === 'Backspace') {
-        // Prevent back navigation if focus is not in an input
-        if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
-            e.preventDefault();
-            handleDeleteNodes();
-        }
-      }
-
-      // Move selected nodes with Arrow keys
-      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-        // Ignore if typing in an input
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        
-        if (e.metaKey || e.ctrlKey) {
-            // Adjust duration: Cmd + Left/Right
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-                e.preventDefault();
-                handleChangeDuration(e.key === 'ArrowRight' ? 'right' : 'left');
-            }
-        } else {
-             // Move nodes
-             e.preventDefault();
-             let deltaStep = 0;
-             let deltaMidi = 0;
-             if (e.key === 'ArrowLeft') deltaStep = -1;
-             if (e.key === 'ArrowRight') deltaStep = 1;
-             if (e.key === 'ArrowUp') deltaMidi = 1;
-             if (e.key === 'ArrowDown') deltaMidi = -1;
-             handleMoveNodes(deltaStep, deltaMidi);
-        }
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [performUndo, performRedo, handleMoveNodes, handleDeleteNodes, handleChangeDuration]);
-
-  // 初始滚动到 C4 (MIDI 60)
-  useEffect(() => {
-    if (scrollContainerRef.current) {
-      const c4Index = MIDI_RANGE.indexOf(60);
-      const containerHeight = scrollContainerRef.current.clientHeight;
-      const targetScrollTop = c4Index * cellHeight - containerHeight / 2 + cellHeight / 2;
-      scrollContainerRef.current.scrollTop = targetScrollTop;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // 仅在挂载时运行一次
-
-  const updatePreset = (id, updates) => {
-    setPresets(prev => prev.map(p => {
-      if (p.id !== id) return p;
-      return { ...p, ...updates };
-    }));
-  };
-
-  const addPreset = () => {
-    const newId = generateId();
-    // Cycle colors
-    const nextColorIndex = presets.length % RAINBOW_COLORS.length;
-    const newPreset = {
-      ...DEFAULT_PRESET,
-      id: newId,
-      name: `预设 ${presets.length + 1}`,
-      color: RAINBOW_COLORS[nextColorIndex],
-    };
-    setPresets(prev => [...prev, newPreset]);
-    setActivePresetId(newId);
-  };
-
-  // 更新 maxStepRef
-  useEffect(() => {
-    const max = Math.max(...nodes.map(n => n.step + (DURATION_STEPS[n.duration] || 1)), 0);
-    maxStepRef.current = max;
-  }, [nodes]);
-
-  const loadInstrument = useCallback(async (instrumentName) => {
-    if (instrumentsRef.current[instrumentName]) return instrumentsRef.current[instrumentName];
-
-    try {
-      const instrument = await Soundfont.instrument(Tone.context.rawContext, instrumentName);
-      instrumentsRef.current[instrumentName] = instrument;
-      return instrument;
-    } catch (e) {
-      console.error('Failed to load instrument', instrumentName, e);
-      return null;
-    }
-  }, []);
-
-  // Preload instruments when presets change
-  useEffect(() => {
-    presets.forEach(p => {
-      if (p.instrument) loadInstrument(p.instrument);
-    });
-  }, [presets, loadInstrument]);
-
-  const stopPlay = useCallback(() => {
-    Tone.getTransport().stop();
-    setIsPlaying(false);
-    setCurrentStep(-1);
-  }, []);
-
-  // 初始化合成器
-  useEffect(() => {
-    // synthRef removed
-
-    loopRef.current = new Tone.Loop((time) => {
-      Tone.Draw.schedule(() => {
-        const seconds = Tone.Transport.seconds;
-        const bpm = Tone.Transport.bpm.value;
-        const bps = bpm / 60;
-        const beat = Math.floor(seconds * bps * 4);
-
-        if (maxStepRef.current > 0 && beat >= maxStepRef.current) {
-          if (isLoopingRef.current) {
-             // Restart transport
-             Tone.Transport.position = 0;
-             setCurrentStep(0);
-          } else {
-             stopPlay();
+      for (let y = startY; y < endY; y += 1) {
+        for (let x = startX; x < endX; x += 1) {
+          const worldX = x + 0.5
+          const worldY = y + 0.5
+          if (
+            isOpaqueAtWorldPoint(spriteA, maskA, worldX, worldY)
+            && isOpaqueAtWorldPoint(spriteB, maskB, worldX, worldY)
+          ) {
+            return true
           }
-        } else {
-          setCurrentStep(beat);
         }
-      }, time);
-    }, '16n').start(0);
+      }
+      return false
+    }
+
+    const boundsOverlap = (a, b) => (
+      a.x < b.x + b.width
+      && a.x + a.width > b.x
+      && a.y < b.y + b.height
+      && a.y + a.height > b.y
+    )
+
+    const startHeroBlink = () => {
+      if (!hero || isBlinking) return
+      isBlinking = true
+      blinkElapsed = 0
+      blinkToggleCount = 0
+      hero.alpha = 0.25
+    }
+
+    const handleKeyDown = (event) => {
+      const key = event.key.toLowerCase()
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        pressedKeys.add(key)
+      }
+    }
+
+    const handleKeyUp = (event) => {
+      const key = event.key.toLowerCase()
+      if (['w', 'a', 's', 'd'].includes(key)) {
+        pressedKeys.delete(key)
+      }
+    }
+
+    const clampHeroToScreen = () => {
+      if (!hero) return
+      const halfWidth = hero.width / 2
+      const halfHeight = hero.height / 2
+
+      hero.x = Math.max(halfWidth, Math.min(app.renderer.width - halfWidth, hero.x))
+      hero.y = Math.max(halfHeight, Math.min(app.renderer.height - halfHeight, hero.y))
+    }
+
+    const boot = async () => {
+      await app.init({
+        background: '#09131f',
+        antialias: true,
+        resizeTo: containerRef.current,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true,
+      })
+
+      initialized = true
+
+      if (destroyed || !containerRef.current) {
+        app.destroy(true, { children: true })
+        return
+      }
+
+      containerRef.current.appendChild(app.canvas)
+      app.stage.sortableChildren = true
+
+      const starfieldContainer = new PIXI.Container()
+      starfieldContainer.zIndex = -100
+      app.stage.addChild(starfieldContainer)
+
+      const starfieldGlow = new PIXI.Graphics()
+      starfieldGlow
+        .rect(0, 0, app.renderer.width, app.renderer.height)
+        .fill({
+          color: 0x0b1521,
+          alpha: 1,
+        })
+      starfieldContainer.addChild(starfieldGlow)
+
+      const createStarTexture = (radius, color, alpha) => {
+        const shape = new PIXI.Graphics()
+        shape.circle(radius, radius, radius).fill({ color, alpha })
+        const texture = app.renderer.generateTexture(shape)
+        shape.destroy()
+        return texture
+      }
+
+      const farStarTexture = createStarTexture(1, 0x9fb2c7, 0.7)
+      const midStarTexture = createStarTexture(1.4, 0xc9def7, 0.82)
+      const nearStarTexture = createStarTexture(2, 0xf2f7ff, 0.95)
+
+      const makeStarLayer = (count, texture, speed, twinkle = false) => {
+        for (let i = 0; i < count; i += 1) {
+          const star = new PIXI.Sprite(texture)
+          star.anchor.set(0.5)
+          star.x = Math.random() * app.renderer.width
+          star.y = Math.random() * app.renderer.height
+          star.alpha = 0.4 + Math.random() * 0.6
+          starfieldContainer.addChild(star)
+          starParticles.push({
+            sprite: star,
+            speed,
+            twinkle,
+            phase: Math.random() * Math.PI * 2,
+            baseAlpha: star.alpha,
+          })
+        }
+      }
+
+      const uniformStarSpeed = 48
+      makeStarLayer(90, farStarTexture, uniformStarSpeed, false)
+      makeStarLayer(56, midStarTexture, uniformStarSpeed, true)
+      makeStarLayer(28, nearStarTexture, uniformStarSpeed, true)
+
+      const heroTexture = await PIXI.Assets.load(heroPng)
+      hero = new PIXI.Sprite(heroTexture)
+      hero.anchor.set(0.5)
+      hero.position.set(app.renderer.width / 2, app.renderer.height * 0.8)
+      app.stage.addChild(hero)
+      const heroImage = await loadImageElement(heroPng)
+      alphaMasks.set(hero, buildAlphaMaskFromImage(heroImage, {
+        x: 0,
+        y: 0,
+        width: heroImage.width,
+        height: heroImage.height,
+      }))
+
+      const bulletContainer = new PIXI.Container()
+      bulletContainer.zIndex = 20
+      app.stage.addChild(bulletContainer)
+
+      const bulletShape = new PIXI.Graphics()
+      bulletShape
+        .roundRect(0, 0, 8, 20, 4)
+        .fill(0xfff2a8)
+        .stroke({ color: 0xffffff, width: 1, alpha: 0.9 })
+      const bulletTexture = app.renderer.generateTexture(bulletShape)
+      bulletShape.destroy()
+
+      const spawnHeroBullet = () => {
+        const bullet = new PIXI.Sprite(bulletTexture)
+        bullet.anchor.set(0.5)
+        bullet.x = hero.x
+        bullet.y = hero.y - hero.height * 0.42
+        bulletContainer.addChild(bullet)
+        bulletSprites.push(bullet)
+      }
+
+      const enemySheet = await PIXI.Assets.load(enemyPng)
+      const enemyContainer = new PIXI.Container()
+      enemyContainer.zIndex = 10
+      app.stage.addChild(enemyContainer)
+      const enemyImage = await loadImageElement(enemyPng)
+
+      const enemyTextures = ENEMY_FRAMES.map((frame) => new PIXI.Texture({
+        source: enemySheet.source,
+        frame: new PIXI.Rectangle(frame.x, frame.y, frame.w, frame.h),
+      }))
+
+      const spawnEnemyById = (enemyId, options = {}) => {
+        const idx = enemyId - 1
+        if (idx < 0 || idx >= enemyTextures.length) return null
+        const frame = ENEMY_FRAMES[idx]
+        const enemy = new PIXI.Sprite(enemyTextures[idx])
+        enemy.anchor.set(0.5)
+        enemy.scale.set(0.22)
+        enemy.x = options.x ?? (90 + Math.random() * Math.max(120, app.renderer.width - 180))
+        enemy.y = options.y ?? -Math.max(36, enemy.height / 2)
+        if (options.motionType === 'sine') {
+          enemy.__motion = {
+            type: 'sine',
+            baseX: enemy.x,
+            amplitude: options.amplitude ?? 70,
+            angularSpeed: options.angularSpeed ?? 2.4,
+            phase: options.phase ?? 0,
+          }
+        } else if (options.motionType === 'snake') {
+          enemy.__motion = {
+            type: 'snake',
+            laneX: options.laneX ?? enemy.x,
+            amplitude: options.amplitude ?? 72,
+            angularSpeed: options.angularSpeed ?? 3.2,
+            phase: options.phase ?? 0,
+            frequency: options.frequency ?? 0.032,
+            segmentOffset: options.segmentOffset ?? 0,
+          }
+        }
+        enemyContainer.addChild(enemy)
+        enemySprites.push(enemy)
+        alphaMasks.set(enemy, buildAlphaMaskFromImage(enemyImage, {
+          x: frame.x,
+          y: frame.y,
+          width: frame.w,
+          height: frame.h,
+        }))
+        return enemy
+      }
+
+      const routeHudText = new PIXI.Text({
+        text: '',
+        style: {
+          fill: 0xeaf4ff,
+          fontSize: 14,
+          fontFamily: 'monospace',
+          stroke: { color: 0x000000, width: 3 },
+        },
+      })
+      routeHudText.zIndex = 2000
+      app.stage.addChild(routeHudText)
+
+      const updateRouteHud = () => {
+        const nextPlan = routePlan[routeCursor]
+        const nextText = nextPlan
+          ? `${nextPlan.meter}m -> #${nextPlan.enemyId}`
+          : (formationTriggered ? '已完成' : `${formationMeter}m -> #${formationEnemyId} x${formationCount} (sin)`)
+        routeHudText.text = `行进管理 速度:${travelSpeedMps.toFixed(0)}m/s | 里程:${traveledMeters.toFixed(1)}m | 下个:${nextText} | 最近:${lastSpawnInfo}`
+        routeHudText.position.set(170, 14)
+      }
+      updateRouteHud()
+
+      const libraryContainer = new PIXI.Container()
+      libraryContainer.zIndex = 5000
+      libraryContainer.visible = showLibrary
+      app.stage.addChild(libraryContainer)
+      libraryContainerRef.current = libraryContainer
+
+      const libraryBackdrop = new PIXI.Graphics()
+      const libraryPanel = new PIXI.Graphics()
+      const libraryGrid = new PIXI.Container()
+      libraryContainer.addChild(libraryBackdrop)
+      libraryContainer.addChild(libraryPanel)
+      libraryContainer.addChild(libraryGrid)
+
+      const titleText = new PIXI.Text({
+        text: 'Enemy Library',
+        style: {
+          fill: 0xffffff,
+          fontSize: 24,
+          fontWeight: '700',
+        },
+      })
+      titleText.position.set(0, 0)
+      libraryContainer.addChild(titleText)
+
+      const libraryEntries = enemyTextures.map((texture, index) => {
+        const item = new PIXI.Container()
+        const sprite = new PIXI.Sprite(texture)
+        const label = new PIXI.Text({
+          text: `#${index + 1}`,
+          style: {
+            fill: 0xfff18a,
+            fontSize: 18,
+            fontWeight: '700',
+          },
+        })
+        sprite.anchor.set(0.5)
+        label.anchor.set(0.5, 0)
+        item.addChild(sprite)
+        item.addChild(label)
+        libraryGrid.addChild(item)
+        return { item, sprite, label }
+      })
+
+      const layoutLibrary = () => {
+        const stageW = app.renderer.width
+        const stageH = app.renderer.height
+        starfieldGlow.clear()
+        starfieldGlow.rect(0, 0, stageW, stageH).fill({
+          color: 0x0b1521,
+          alpha: 1,
+        })
+        for (const particle of starParticles) {
+          if (particle.sprite.x > stageW) particle.sprite.x = Math.random() * stageW
+          if (particle.sprite.y > stageH) particle.sprite.y = Math.random() * stageH
+        }
+        libraryBackdrop.clear()
+        libraryBackdrop.rect(0, 0, stageW, stageH).fill(0x000000)
+        libraryBackdrop.alpha = 0.62
+
+        const panelPadding = 24
+        const panelX = panelPadding
+        const panelY = panelPadding
+        const panelW = Math.max(320, stageW - panelPadding * 2)
+        const panelH = Math.max(260, stageH - panelPadding * 2)
+        libraryPanel.clear()
+        libraryPanel.roundRect(panelX, panelY, panelW, panelH, 16).fill(0x10263d)
+        libraryPanel
+          .roundRect(panelX, panelY, panelW, panelH, 16)
+          .stroke({ color: 0x79b8ff, width: 2, alpha: 0.85 })
+
+        titleText.position.set(panelX + 24, panelY + 14)
+
+        const gridTop = panelY + 64
+        const gridLeft = panelX + 18
+        const gridRight = panelX + panelW - 18
+        const gridBottom = panelY + panelH - 20
+        const cols = Math.max(3, Math.min(6, Math.floor((gridRight - gridLeft) / 140)))
+        const cellW = (gridRight - gridLeft) / cols
+        const rows = Math.ceil(libraryEntries.length / cols)
+        const cellH = Math.max(98, (gridBottom - gridTop) / Math.max(1, rows))
+
+        libraryEntries.forEach((entry, index) => {
+          const col = index % cols
+          const row = Math.floor(index / cols)
+          const centerX = gridLeft + cellW * (col + 0.5)
+          const centerY = gridTop + cellH * (row + 0.5)
+          const targetSize = Math.min(cellW * 0.72, cellH * 0.58)
+          const maxSide = Math.max(entry.sprite.texture.width, entry.sprite.texture.height)
+          const scale = maxSide > 0 ? targetSize / maxSide : 0.2
+
+          entry.item.position.set(centerX, centerY)
+          entry.sprite.scale.set(scale)
+          entry.sprite.position.set(0, -10)
+          entry.label.position.set(0, cellH * 0.28)
+        })
+      }
+
+      resizeHandler = () => {
+        clampHeroToScreen()
+        layoutLibrary()
+        updateRouteHud()
+      }
+
+      window.addEventListener('keydown', handleKeyDown)
+      window.addEventListener('keyup', handleKeyUp)
+      app.renderer.on('resize', resizeHandler)
+      layoutLibrary()
+
+      app.ticker.add(() => {
+        if (!hero) return
+
+        const deltaSeconds = app.ticker.deltaMS / 1000
+        let moveX = 0
+        let moveY = 0
+
+        if (pressedKeys.has('a')) moveX -= 1
+        if (pressedKeys.has('d')) moveX += 1
+        if (pressedKeys.has('w')) moveY -= 1
+        if (pressedKeys.has('s')) moveY += 1
+
+        if (moveX !== 0 || moveY !== 0) {
+          const length = Math.hypot(moveX, moveY)
+          hero.x += (moveX / length) * heroSpeed * deltaSeconds
+          hero.y += (moveY / length) * heroSpeed * deltaSeconds
+          clampHeroToScreen()
+        }
+
+        const stageW = app.renderer.width
+        const stageH = app.renderer.height
+        fireElapsed += deltaSeconds
+        while (fireElapsed >= fireInterval) {
+          fireElapsed -= fireInterval
+          spawnHeroBullet()
+        }
+
+        traveledMeters += travelSpeedMps * deltaSeconds
+        while (routeCursor < routePlan.length && traveledMeters >= routePlan[routeCursor].meter) {
+          const plan = routePlan[routeCursor]
+          spawnEnemyById(plan.enemyId)
+          lastSpawnInfo = `${plan.meter}m:#${plan.enemyId}`
+          routeCursor += 1
+        }
+        if (!formationTriggered && traveledMeters >= formationMeter) {
+          formationTriggered = true
+          const formationCenterX = stageW / 2
+          const spawnY = -80
+          for (let i = 0; i < formationCount; i += 1) {
+            spawnEnemyById(formationEnemyId, {
+              x: formationCenterX,
+              y: spawnY - i * 42,
+              motionType: 'snake',
+              laneX: formationCenterX,
+              amplitude: 78,
+              angularSpeed: 3.1,
+              phase: 0,
+              frequency: 0.036,
+              segmentOffset: i * 0.9,
+            })
+          }
+          lastSpawnInfo = `${formationMeter}m:#${formationEnemyId}x${formationCount}(snake)`
+        }
+        updateRouteHud()
+
+        for (const particle of starParticles) {
+          const star = particle.sprite
+          star.y += particle.speed * deltaSeconds
+          if (particle.twinkle) {
+            particle.phase += deltaSeconds * 2.8
+            star.alpha = Math.max(0.2, Math.min(1, particle.baseAlpha + Math.sin(particle.phase) * 0.22))
+          }
+          if (star.y > stageH + 6) {
+            star.y = -6
+            star.x = Math.random() * stageW
+          }
+        }
+
+        for (let i = bulletSprites.length - 1; i >= 0; i -= 1) {
+          const bullet = bulletSprites[i]
+          bullet.y -= bulletSpeed * deltaSeconds
+          if (bullet.y < -24) {
+            bulletContainer.removeChild(bullet)
+            bullet.destroy()
+            bulletSprites.splice(i, 1)
+          }
+        }
+
+        for (let i = enemySprites.length - 1; i >= 0; i -= 1) {
+          const enemy = enemySprites[i]
+          if (enemy.__motion?.type === 'sine') {
+            enemy.__motion.phase += enemy.__motion.angularSpeed * deltaSeconds
+            enemy.x = enemy.__motion.baseX + Math.sin(enemy.__motion.phase) * enemy.__motion.amplitude
+          } else if (enemy.__motion?.type === 'snake') {
+            enemy.__motion.phase += enemy.__motion.angularSpeed * deltaSeconds
+            const wave = enemy.y * enemy.__motion.frequency + enemy.__motion.phase - enemy.__motion.segmentOffset
+            enemy.x = enemy.__motion.laneX + Math.sin(wave) * enemy.__motion.amplitude
+          }
+          enemy.y += enemyMoveSpeed * deltaSeconds
+          if (enemy.y > stageH + enemy.height) {
+            enemyContainer.removeChild(enemy)
+            alphaMasks.delete(enemy)
+            enemy.destroy()
+            enemySprites.splice(i, 1)
+          }
+        }
+
+        for (let bi = bulletSprites.length - 1; bi >= 0; bi -= 1) {
+          const bullet = bulletSprites[bi]
+          const bulletBounds = bullet.getBounds()
+          let hit = false
+          for (let ei = enemySprites.length - 1; ei >= 0; ei -= 1) {
+            const enemy = enemySprites[ei]
+            if (!boundsOverlap(bulletBounds, enemy.getBounds())) continue
+            enemyContainer.removeChild(enemy)
+            alphaMasks.delete(enemy)
+            enemy.destroy()
+            enemySprites.splice(ei, 1)
+            hit = true
+            break
+          }
+          if (hit) {
+            bulletContainer.removeChild(bullet)
+            bullet.destroy()
+            bulletSprites.splice(bi, 1)
+          }
+        }
+
+        if (isBlinking) {
+          blinkElapsed += deltaSeconds
+          while (blinkElapsed >= blinkInterval) {
+            blinkElapsed -= blinkInterval
+            blinkToggleCount += 1
+            hero.alpha = hero.alpha < 1 ? 1 : 0.25
+            if (blinkToggleCount >= blinkTotalToggles) {
+              isBlinking = false
+              hero.alpha = 1
+              break
+            }
+          }
+          return
+        }
+
+        for (const enemy of enemySprites) {
+          if (pixelPerfectCollides(hero, enemy)) {
+            startHeroBlink()
+            break
+          }
+        }
+      })
+    }
+
+    boot().catch((error) => {
+      console.error('Pixi boot failed:', error)
+    })
 
     return () => {
-      // synthRef removed
-      partRef.current?.dispose();
-      loopRef.current?.dispose();
-    };
-  }, [stopPlay]);
+      destroyed = true
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      if (initialized && resizeHandler) {
+        app.renderer.off('resize', resizeHandler)
+      }
+      pressedKeys.clear()
+      bulletSprites.length = 0
+      enemySprites.length = 0
+      libraryContainerRef.current = null
 
-  // 更新调度任务
+      if (initialized) {
+        app.destroy(true, { children: true })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hmrVersion])
+
   useEffect(() => {
-    if (partRef.current) {
-      partRef.current.dispose();
+    if (libraryContainerRef.current) {
+      libraryContainerRef.current.visible = showLibrary
     }
-
-    const partData = nodes.map(node => {
-      // Find preset for config
-      const preset = presets.find(p => p.id === node.presetId) || presets[0];
-      return {
-        time: node.time,
-        note: midiToNote(node.midi),
-        duration: node.duration, // Use node's duration (which was copied from preset at creation)
-        velocity: (preset.volume ?? 1) * masterVolume, // 使用预设音量 * 总音量
-        instrument: preset.instrument
-      };
-    });
-
-    partRef.current = new Tone.Part((time, value) => {
-      const inst = instrumentsRef.current[value.instrument];
-      if (inst) {
-        try {
-          const durationSec = Tone.Time(value.duration).toSeconds();
-          inst.play(value.note, time, { duration: durationSec, gain: value.velocity });
-        } catch (e) {
-          console.error(e);
-        }
-      }
-    }, partData).start(0);
-
-    partRef.current.loop = false;
-  }, [nodes, presets, masterVolume]); // Depend on presets and masterVolume to update sound immediately
-
-  const togglePlay = async () => {
-    if (Tone.getTransport().state !== 'started') {
-      await Tone.start();
-      Tone.getTransport().position = 0;
-      Tone.getTransport().start();
-      setIsPlaying(true);
-    } else {
-      Tone.getTransport().pause();
-      setIsPlaying(false);
-    }
-  };
-
-  const handleScroll = (e) => {
-    const { scrollLeft, clientWidth, scrollWidth } = e.target;
-    if (scrollWidth - (scrollLeft + clientWidth) < 100) {
-      setGridSteps(prev => prev + 32);
-    }
-    if (xAxisScrollRef.current) {
-      xAxisScrollRef.current.scrollLeft = scrollLeft;
-    }
-  };
-
-  const toggleNode = useCallback((midi, step) => {
-    // 检查是否已存在
-    const currentNodes = nodesRef.current;
-    const existingNode = currentNodes.find(n => n.midi === midi && n.step === step);
-
-    if (existingNode) {
-      // 存在 -> 什么都不做 (点击只负责添加，删除改为 Delete 键)
-      return;
-    } 
-    
-    // 不存在 -> 添加
-    pushToHistory(); // 记录历史
-    
-    const time = `0:0:${step}`;
-    // Find active preset to get duration default
-    const currentPreset = presets.find(p => p.id === activePresetId) || presets[0];
-
-    const newNode = {
-      id: generateId(),
-      midi,
-      time,
-      step,
-      presetId: activePresetId, // Link to preset
-      duration: currentPreset.duration, // Copy duration as default
-    };
-
-    // 自动扩展网格
-    setGridSteps(prev => {
-      const nodeEnd = step + (DURATION_STEPS[newNode.duration] || 1);
-      if (nodeEnd > prev) {
-        return Math.ceil(nodeEnd / 32) * 32 + 32;
-      }
-      return prev;
-    });
-
-    setNodes([...currentNodes, newNode]);
-    return newNode.id;
-  }, [activePresetId, presets, pushToHistory]);
-
-  const handleRightClick = useCallback((e, midi, step) => {
-    e.preventDefault();
-    pushToHistory();
-    setNodes(prev => prev.filter(n => !(n.midi === midi && n.step === step)));
-  }, [pushToHistory]);
+  }, [showLibrary])
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* 顶部工具栏：预设列表(左) + 播放控制(右) + 预设设置(下) */}
-      <div style={{
-        background: '#141414',
-        borderBottom: '1px solid #262626',
-        display: 'flex',
-        flexDirection: 'column',
-        flexShrink: 0,
-      }}>
-        {/* 第一行：左右布局 */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 16,
-          padding: '14px 20px 14px 20px',
-        }}>
-
-          {/* 左侧：预设列表 */}
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'nowrap', alignItems: 'center', overflowX: 'auto', flex: 1 }}>
-            {headerPrefix}
-            {presets.map(p => (
-              <div
-                key={p.id}
-                onClick={() => setActivePresetId(p.id)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  padding: '6px 12px',
-                  background: activePresetId === p.id ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  border: `1px solid ${activePresetId === p.id ? p.color : '#424242'}`,
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  userSelect: 'none',
-                  whiteSpace: 'nowrap'
-                }}
-              >
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: p.color, marginRight: 8 }} />
-                <span style={{ color: activePresetId === p.id ? '#fff' : '#aaa', fontSize: 13 }}>{p.name}</span>
-              </div>
-            ))}
-            <Button icon={<PlusOutlined />} onClick={addPreset} type="dashed">新建</Button>
-          </div>
-
-          {/* 右侧：操作按钮组 */}
-          <Space>
-            <div style={{ display: 'flex', alignItems: 'center', width: 140, marginRight: 8 }}>
-              <SoundOutlined style={{ color: '#aaa', marginRight: 8 }} />
-              <Slider
-                min={0}
-                max={4}
-                step={0.1}
-                value={masterVolume}
-                onChange={setMasterVolume}
-                style={{ flex: 1 }}
-                tooltip={{ formatter: v => `总音量: ${Math.round(v * 100)}%` }}
-              />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', marginRight: 16 }}>
-              <Text style={{ color: '#aaa', fontSize: 12, marginRight: 8, userSelect: 'none' }}>播放速度</Text>
-              <InputNumber
-                min={40}
-                max={300}
-                value={bpm}
-                onChange={setBpm}
-                size="middle"
-                style={{ width: 80 }}
-              />
-            </div>
-            <Popover
-              content={
-                <div style={{ width: 300 }}>
-                  <div style={{ marginBottom: 10 }}>
-                    <Text>X轴缩放 (宽度)</Text>
-                    <Row gutter={8}>
-                      <Col span={16}>
-                        <Slider min={10} max={100} value={cellWidth} onChange={setCellWidth} />
-                      </Col>
-                      <Col span={8}>
-                        <InputNumber min={10} max={100} style={{ width: '100%' }} value={cellWidth} onChange={setCellWidth} />
-                      </Col>
-                    </Row>
-                  </div>
-                  <div style={{ marginBottom: 10 }}>
-                    <Text>Y轴缩放 (高度)</Text>
-                    <Row gutter={8}>
-                      <Col span={16}>
-                        <Slider min={4} max={50} value={cellHeight} onChange={setCellHeight} />
-                      </Col>
-                      <Col span={8}>
-                        <InputNumber min={4} max={50} style={{ width: '100%' }} value={cellHeight} onChange={setCellHeight} />
-                      </Col>
-                    </Row>
-                  </div>
-                  <Divider style={{ margin: '10px 0' }} />
-                  <div>
-                    <Text>整体缩放 (基准倍率)</Text>
-                    <Slider
-                      min={0.5}
-                      max={2}
-                      step={0.1}
-                      defaultValue={1}
-                      tooltip={{ formatter: (v) => `${Math.round(v * 100)}%` }}
-                      onChange={(v) => {
-                        setCellWidth(60 * v);
-                        setCellHeight(28 * v);
-                      }}
-                    />
-                  </div>
-                </div>
-              }
-              title="视图设置"
-              trigger="click"
-            >
-              <Button icon={<SettingOutlined />}>视图设置</Button>
-            </Popover>
-            <Button 
-              icon={isFullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />} 
-              onClick={toggleFullscreen}
-            />
-            <Divider orientation="vertical" style={{ borderColor: '#424242' }} />
-            <a 
-              href="https://github.com/janglikv/www.kaixin233.xyz" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              style={{ marginLeft: 8, display: 'flex', alignItems: 'center' }}
-            >
-              <Avatar 
-                icon={<GithubOutlined />} 
-                size={32}
-                style={{ 
-                  cursor: 'pointer', 
-                  border: '1px solid #424242',
-                  backgroundColor: 'transparent',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center'
-                }}
-              />
-            </a>
-          </Space>
-        </div>
-
-        <Divider style={{ margin: 0, borderColor: '#262626' }} />
-
-        {/* 第二行：预设详细设置 */}
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '24px',
-          flexWrap: 'wrap',
-          padding: '6px 20px 10px 20px',
-          // background: '#191919',
-        }}>
-          <Space>
-            <Input
-              value={activePreset.name}
-              onChange={e => updatePreset(activePresetId, { name: e.target.value })}
-              style={{ width: 120 }}
-              placeholder="预设名称"
-              size="small"
-            />
-            {/* 颜色选择器 (简化版) */}
-            <div style={{ display: 'flex', gap: 4 }}>
-              {RAINBOW_COLORS.map(c => (
-                <div
-                  key={c}
-                  onClick={() => updatePreset(activePresetId, { color: c })}
-                  style={{
-                    width: 16, height: 16, borderRadius: 2, background: c, cursor: 'pointer',
-                    border: activePreset.color === c ? '2px solid #fff' : '1px solid transparent'
-                  }}
-                />
-              ))}
-            </div>
-          </Space>
-
-          <Divider orientation="vertical" style={{ borderColor: '#333' }} />
-
-          <Space>
-            <Select
-              value={activePreset.duration}
-              onChange={v => updatePreset(activePresetId, { duration: v })}
-              options={DURATIONS}
-              style={{ minWidth: 100 }}
-              size="small"
-              popupMatchSelectWidth={false}
-            />
-            <Select
-              value={activePreset.instrument}
-              onChange={v => updatePreset(activePresetId, { instrument: v })}
-              options={INSTRUMENTS}
-              style={{ width: 180 }}
-              size="small"
-              placeholder="选择乐器"
-            />
-            <div style={{ display: 'flex', alignItems: 'center', marginLeft: 8, width: 120 }}>
-              <Text style={{ color: '#aaa', fontSize: 12, marginRight: 4 }}>音量</Text>
-              <Slider
-                min={0}
-                max={4}
-                step={0.1}
-                value={activePreset.volume ?? 1}
-                onChange={v => updatePreset(activePresetId, { volume: v })}
-                style={{ flex: 1 }}
-                tooltip={{ formatter: v => `${Math.round(v * 100)}%` }}
-              />
-            </div>
-          </Space>
-
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Switch 
-                    checkedChildren={<RetweetOutlined />} 
-                    unCheckedChildren={<RetweetOutlined />} 
-                    checked={isLooping}
-                    onChange={setIsLooping}
-                />
-                <Text style={{ color: '#aaa', fontSize: 12 }}>循环</Text>
-            </div>
-            <Divider orientation="vertical" style={{ borderColor: '#333', height: 24 }} />
-            <Space>
-                <Button
-                type={isPlaying ? 'default' : 'primary'}
-                icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-                onClick={togglePlay}
-                >
-                {isPlaying ? '暂停' : '播放'}
-                </Button>
-                <Button icon={<StopOutlined />} onClick={stopPlay}>停止</Button>
-            </Space>
-          </div>
-        </div>
-      </div>
-
-      {/* 坐标图表区域 + 底部 X 轴 */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid #262626', borderRadius: '4px', background: '#0d0d0d' }}>
-        <div
-          ref={scrollContainerRef}
-          onScroll={handleScroll}
-          className="no-scrollbar"
-          style={{
-            position: 'relative',
-            overflow: 'auto',
-            flex: 1
-          }}
-        >
-          <div style={{ display: 'flex', width: `${gridSteps * cellWidth + 80}px` }}>
-            {/* Y轴刻度 */}
-            <div style={{
-              width: '80px',
-              flexShrink: 0,
-              position: 'sticky',
-              left: 0,
-              zIndex: 10,
-              background: '#141414',
-              borderRight: '1px solid #262626'
-            }}>
-              {MIDI_RANGE.map(midi => (
-                <div key={midi} style={{
-                  height: cellHeight,
-                  padding: '0 8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  fontSize: '9px',
-                  color: midi % 12 === 0 ? '#177ddc' : '#888',
-                  fontWeight: midi % 12 === 0 ? 'bold' : 'normal',
-                  borderBottom: '1px solid #1a1a1a',
-                  borderRight: `2px solid ${hoveredCell?.midi === midi ? '#177ddc' : 'transparent'}`,
-                  transition: 'border-color 0.1s'
-                }}>
-                  <span>{midiToNote(midi)}</span>
-                  <span>{midi}</span>
-                </div>
-              ))}
-            </div>
-
-            {/* 图表网格 */}
-            <div 
-              style={{ 
-                flexGrow: 1, 
-                position: 'relative',
-                height: MIDI_RANGE.length * cellHeight,
-                backgroundImage: `
-                  linear-gradient(to right, #1a1a1a 1px, transparent 1px),
-                  linear-gradient(to bottom, #1a1a1a 1px, transparent 1px),
-                  linear-gradient(to bottom, #111 ${cellHeight}px, transparent ${cellHeight}px)
-                `,
-                backgroundSize: `
-                  ${cellWidth}px ${cellHeight}px,
-                  ${cellWidth}px ${cellHeight}px,
-                  100% ${cellHeight * 12}px
-                `,
-                backgroundAttachment: 'local',
-                cursor: 'crosshair',
-              }}
-              onMouseDown={(e) => {
-                mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
-                
-                // Box Selection Logic
-                if (e.button !== 0) return; // Left click only
-
-                const startX = e.nativeEvent.offsetX;
-                const startY = e.nativeEvent.offsetY;
-                
-                dragStartRef.current = { x: startX, y: startY };
-
-                const getSelectionRect = (x1, y1, x2, y2) => ({
-                    x: Math.min(x1, x2),
-                    y: Math.min(y1, y2),
-                    width: Math.abs(x2 - x1),
-                    height: Math.abs(y2 - y1)
-                });
-
-                const handleWindowMouseMove = (moveEvent) => {
-                    if (!dragStartRef.current) return;
-                    
-                    const dx = moveEvent.clientX - mouseDownPosRef.current.x;
-                    const dy = moveEvent.clientY - mouseDownPosRef.current.y;
-                    
-                    const currentX = startX + dx;
-                    const currentY = startY + dy;
-                    
-                    const rect = getSelectionRect(startX, startY, currentX, currentY);
-                    
-                    if (rect.width > 5 || rect.height > 5) {
-                        setSelectionBox(rect);
-                        selectionBoxRef.current = rect;
-                    }
-                };
-
-                const handleWindowMouseUp = (upEvent) => {
-                    const finalBox = selectionBoxRef.current;
-                    
-                    if (finalBox) {
-                        const newSelected = new Set();
-                        
-                        if (upEvent.metaKey || upEvent.ctrlKey || upEvent.shiftKey) {
-                            selectedNodeIds.forEach(id => newSelected.add(id));
-                        }
-
-                        nodes.forEach(node => {
-                            const nodeX = node.step * cellWidth;
-                            const midiIndex = MIDI_RANGE.indexOf(node.midi);
-                            const nodeY = midiIndex * cellHeight;
-                            // Only check intersection with the head of the node (single cell width)
-                            const nodeHeadW = cellWidth; 
-                            const nodeH = cellHeight;
-
-                            if (
-                                nodeX < finalBox.x + finalBox.width &&
-                                nodeX + nodeHeadW > finalBox.x &&
-                                nodeY < finalBox.y + finalBox.height &&
-                                nodeY + nodeH > finalBox.y
-                            ) {
-                                newSelected.add(node.id);
-                            }
-                        });
-
-                        setSelectedNodeIds(newSelected);
-                    }
-                    
-                    setSelectionBox(null);
-                    selectionBoxRef.current = null;
-                    dragStartRef.current = null;
-                    
-                    window.removeEventListener('mousemove', handleWindowMouseMove);
-                    window.removeEventListener('mouseup', handleWindowMouseUp);
-                };
-
-                window.addEventListener('mousemove', handleWindowMouseMove);
-                window.addEventListener('mouseup', handleWindowMouseUp);
-              }}
-              onClick={(e) => {
-                // Check for drag vs click
-                if (mouseDownPosRef.current) {
-                    const dx = Math.abs(e.clientX - mouseDownPosRef.current.x);
-                    const dy = Math.abs(e.clientY - mouseDownPosRef.current.y);
-                    if (dx > 5 || dy > 5) {
-                        return; // It was a drag, ignore click
-                    }
-                }
-
-                // const x = e.clientX - rect.left; 
-                const offsetX = e.nativeEvent.offsetX;
-                const offsetY = e.nativeEvent.offsetY;
-                
-                const step = Math.floor(offsetX / cellWidth);
-                const midiIndex = Math.floor(offsetY / cellHeight);
-                const midi = MIDI_RANGE[midiIndex];
-
-                if (step >= 0 && step < gridSteps && midi !== undefined) {
-                  const existingNode = nodes.find(n => n.midi === midi && n.step === step);
-                  
-                  if (existingNode) {
-                    const isSelected = selectedNodeIds.has(existingNode.id);
-                    if (isSelected) {
-                      // 已选中 -> 取消选中
-                      setSelectedNodeIds(prev => {
-                        const next = new Set(prev);
-                        next.delete(existingNode.id);
-                        return next;
-                      });
-                    } else {
-                      // 未选中 -> 处理选中逻辑
-                      if (e.metaKey || e.ctrlKey) {
-                        setSelectedNodeIds(prev => new Set(prev).add(existingNode.id));
-                      } else {
-                        setSelectedNodeIds(new Set([existingNode.id]));
-                      }
-                    }
-                  } else {
-                    // Add node
-                    const newNodeId = toggleNode(midi, step);
-                    if (newNodeId) {
-                      if (e.metaKey || e.ctrlKey) {
-                        setSelectedNodeIds(prev => new Set(prev).add(newNodeId));
-                      } else {
-                        setSelectedNodeIds(new Set([newNodeId]));
-                      }
-                    }
-                  }
-                }
-              }}
-              onMouseMove={(e) => {
-                const offsetX = e.nativeEvent.offsetX;
-                const offsetY = e.nativeEvent.offsetY;
-                
-                const step = Math.floor(offsetX / cellWidth);
-                const midiIndex = Math.floor(offsetY / cellHeight);
-                const midi = MIDI_RANGE[midiIndex];
-
-                if (step >= 0 && step < gridSteps && midi !== undefined) {
-                  const cell = { midi, step };
-                  setHoveredCell(cell);
-                  hoveredCellRef.current = cell;
-                } else {
-                  setHoveredCell(null);
-                  hoveredCellRef.current = null;
-                }
-              }}
-              onMouseLeave={() => {
-                setHoveredCell(null);
-                hoveredCellRef.current = null;
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                const offsetX = e.nativeEvent.offsetX;
-                const offsetY = e.nativeEvent.offsetY;
-                
-                const step = Math.floor(offsetX / cellWidth);
-                const midiIndex = Math.floor(offsetY / cellHeight);
-                const midi = MIDI_RANGE[midiIndex];
-                
-                if (step >= 0 && step < gridSteps && midi !== undefined) {
-                  handleRightClick(e, midi, step);
-                }
-              }}
-            >
-              {/* 播放头高亮列 */}
-              {currentStep >= 0 && (
-                <div
-                  style={{
-                    position: 'absolute',
-                    left: currentStep * cellWidth,
-                    top: 0,
-                    bottom: 0,
-                    width: cellWidth,
-                    background: 'rgba(23, 125, 220, 0.15)',
-                    pointerEvents: 'none',
-                    zIndex: 1
-                  }}
-                />
-              )}
-
-              {/* Hover 高亮 */}
-              {hoveredCell && (
-                 <div
-                  style={{
-                    position: 'absolute',
-                    left: hoveredCell.step * cellWidth,
-                    top: MIDI_RANGE.indexOf(hoveredCell.midi) * cellHeight,
-                    width: cellWidth,
-                    height: cellHeight,
-                    border: '1px solid #fff',
-                    pointerEvents: 'none',
-                    zIndex: 3,
-                  }}
-                />
-              )}
-
-              {/* Box Selection Visual */}
-              {selectionBox && (
-                <div
-                    style={{
-                        position: 'absolute',
-                        left: selectionBox.x,
-                        top: selectionBox.y,
-                        width: selectionBox.width,
-                        height: selectionBox.height,
-                        background: 'rgba(23, 125, 220, 0.1)',
-                        border: '1px solid #177ddc',
-                        pointerEvents: 'none',
-                        zIndex: 100
-                    }}
-                />
-              )}
-
-              {/* 音符节点 */}
-              {nodes.map(node => {
-                const nodePreset = presets.find(p => p.id === node.presetId) || presets[0];
-                const midiIndex = MIDI_RANGE.indexOf(node.midi);
-                if (midiIndex === -1) return null;
-                const durationSteps = DURATION_STEPS[node.duration] || 1;
-                const isSelected = selectedNodeIds.has(node.id);
-
-                return (
-                  <div
-                    key={node.id}
-                    style={{
-                      position: 'absolute',
-                      left: node.step * cellWidth + 1,
-                      top: midiIndex * cellHeight + 1,
-                      width: cellWidth - 2, // 恢复为单个单元格宽度
-                      height: cellHeight - 1,
-                      background: nodePreset.color,
-                      borderRadius: '2px',
-                      zIndex: 2,
-                      opacity: 1,
-                      pointerEvents: 'none',
-                      boxShadow: 'none',
-                    }}
-                  >
-                    {/* 选中标识：小白点 */}
-                    {isSelected && (
-                      <div 
-                        style={{
-                          position: 'absolute',
-                          left: '6px',
-                          top: '50%',
-                          transform: 'translateY(-50%)',
-                          width: '6px',
-                          height: '6px',
-                          background: '#fff',
-                          borderRadius: '50%',
-                          boxShadow: '0 0 4px rgba(0,0,0,0.5)',
-                          zIndex: 3
-                        }}
-                      />
-                    )}
-                    {/* 扩展下划线：显示音长 */}
-                    <div 
-                      style={{
-                        position: 'absolute',
-                        bottom: 0,
-                        left: 0,
-                        width: durationSteps * cellWidth - 2,
-                        height: '3px',
-                        background: nodePreset.color,
-                        borderRadius: '1px',
-                        boxShadow: 'none',
-                      }}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-        
-        {/* 固定底部的 X 轴容器 */}
-        <div 
-           ref={xAxisScrollRef}
-           className="no-scrollbar"
-           style={{ 
-             height: '30px', 
-             background: '#141414',
-             borderTop: '1px solid #262626',
-             display: 'flex',
-             overflow: 'hidden', // Hide scrollbar, controlled by JS
-             flexShrink: 0
-           }}
-        >
-          {/* 左下角空块 (对应 YAxis 宽度) */}
-          <div style={{ width: 80, flexShrink: 0, background: '#141414', borderRight: '1px solid #262626' }} />
-           
-          {/* X轴刻度 */}
-          <div style={{ display: 'flex' }}> 
-             {Array.from({ length: gridSteps }).map((_, i) => (
-                <div key={i} style={{
-                  width: cellWidth,
-                  flexShrink: 0,
-                  textAlign: 'center',
-                  height: '30px',
-                  background: currentStep === i ? '#111' : 'transparent',
-                  borderRight: '1px solid #1a1a1a',
-                  borderTop: `2px solid ${hoveredCell?.step === i ? '#177ddc' : 'transparent'}`,
-                  fontSize: '10px',
-                  lineHeight: '30px',
-                  color: i % 4 === 0 ? '#177ddc' : '#555',
-                  transition: 'all 0.1s'
-                }}>
-                  {i}
-                </div>
-              ))}
-          </div>
-        </div>
-      </div>
-      {/* 底部悬浮操作栏 */}
-      {selectedNodeIds.size > 0 && (
-        <div style={{
-            position: 'fixed',
-            bottom: 30,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 100,
-            boxShadow: '0 6px 16px 0 rgba(0, 0, 0, 0.4)',
-            borderRadius: 8,
-        }}>
-            <Card size="small" bodyStyle={{ padding: '8px 16px' }} bordered={false} style={{ background: '#1f1f1f' }}>
-                <Space size={16}>
-                    <Space size={4}>
-                         <Button icon={<ArrowLeftOutlined />} size="small" onClick={() => handleMoveNodes(-1, 0)} />
-                         <div style={{ display: 'flex', flexDirection: 'column' }}>
-                             <Button icon={<ArrowUpOutlined />} size="small" onClick={() => handleMoveNodes(0, 1)} style={{ marginBottom: 2 }} />
-                             <Button icon={<ArrowDownOutlined />} size="small" onClick={() => handleMoveNodes(0, -1)} />
-                         </div>
-                         <Button icon={<ArrowRightOutlined />} size="small" onClick={() => handleMoveNodes(1, 0)} />
-                    </Space>
-                    
-                    <Divider type="vertical" />
-                    
-                    <Select 
-                        size="small" 
-                        style={{ width: 100 }} 
-                        placeholder="节拍"
-                        value={nodes.find(n => selectedNodeIds.has(n.id))?.duration} 
-                        onChange={(val) => handleChangeDuration(val)}
-                        options={DURATIONS} 
-                        popupMatchSelectWidth={false}
-                    />
-
-                    <Divider type="vertical" />
-
-                    <Button danger type="primary" icon={<DeleteOutlined />} size="small" onClick={handleDeleteNodes}>
-                        删除 ({selectedNodeIds.size})
-                    </Button>
-                </Space>
-            </Card>
-        </div>
-      )}
+    <div className="app-root">
+      <button
+        type="button"
+        className="library-btn"
+        onClick={() => setShowLibrary((value) => !value)}
+      >
+        {showLibrary ? '关闭资料库' : '资料库'}
+      </button>
+      <div ref={containerRef} className="game-root" />
     </div>
-  );
-};
-
-const AppContent = () => {
-  const [spaces, setSpaces] = useState(() => {
-    const saved = localStorage.getItem('spaces');
-    return saved ? JSON.parse(saved) : [{ id: 'default', name: '默认空间' }];
-  });
-
-  const [activeSpaceId, setActiveSpaceId] = useState(() => {
-    const saved = localStorage.getItem('activeSpaceId');
-    return saved || 'default';
-  });
-
-  const [isRenameModalOpen, setIsRenameModalOpen] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
-
-  useEffect(() => {
-    localStorage.setItem('spaces', JSON.stringify(spaces));
-  }, [spaces]);
-
-  useEffect(() => {
-    localStorage.setItem('activeSpaceId', activeSpaceId);
-  }, [activeSpaceId]);
-
-  const handleSpaceChange = (value) => {
-    if (value === 'ADD_NEW_SPACE') {
-      const newSpaceId = generateId();
-      const newSpaceName = `空间 ${spaces.length + 1}`;
-      const newSpace = { id: newSpaceId, name: newSpaceName };
-      setSpaces([...spaces, newSpace]);
-      setActiveSpaceId(newSpaceId);
-    } else {
-      setActiveSpaceId(value);
-    }
-  };
-
-  const startRename = () => {
-    const currentSpace = spaces.find(s => s.id === activeSpaceId);
-    if (currentSpace) {
-      setRenameValue(currentSpace.name);
-      setIsRenameModalOpen(true);
-    }
-  };
-
-  const handleRenameOk = () => {
-    if (!renameValue.trim()) return;
-    setSpaces(prev => prev.map(s => {
-      if (s.id === activeSpaceId) {
-        return { ...s, name: renameValue };
-      }
-      return s;
-    }));
-    setIsRenameModalOpen(false);
-  };
-
-  const handleDeleteSpace = () => {
-    if (spaces.length <= 1) {
-        return; 
-    }
-    const newSpaces = spaces.filter(s => s.id !== activeSpaceId);
-    setSpaces(newSpaces);
-    setActiveSpaceId(newSpaces[0].id);
-    setIsRenameModalOpen(false);
-  };
-
-  return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <SpaceWorkspace 
-            key={activeSpaceId} 
-            spaceId={activeSpaceId}
-            headerPrefix={
-                <div style={{ display: 'flex', alignItems: 'center', marginRight: 16 }}>
-                    <Select
-                        value={activeSpaceId}
-                        onChange={handleSpaceChange}
-                        style={{ width: 140 }}
-                        variant="filled"
-                        options={[
-                            ...spaces.map(s => ({ label: s.name, value: s.id })),
-                            { label: '+ 添加空间', value: 'ADD_NEW_SPACE' }
-                        ]}
-                    />
-                    <Button 
-                        type="text" 
-                        icon={<SettingOutlined />} 
-                        size="small"
-                        onClick={startRename}
-                        style={{ marginLeft: 4, color: '#888' }}
-                    />
-                </div>
-            }
-        />
-        <Modal
-            title="空间设置"
-            open={isRenameModalOpen}
-            onOk={handleRenameOk}
-            onCancel={() => setIsRenameModalOpen(false)}
-            okText="保存"
-            cancelText="取消"
-            footer={[
-                spaces.length > 1 && (
-                    <Button key="delete" danger onClick={handleDeleteSpace} style={{ float: 'left' }}>
-                        删除空间
-                    </Button>
-                ),
-                <Button key="cancel" onClick={() => setIsRenameModalOpen(false)}>
-                    取消
-                </Button>,
-                <Button key="submit" type="primary" onClick={handleRenameOk}>
-                    保存
-                </Button>,
-            ]}
-        >
-            <div style={{ marginBottom: 8 }}>空间名称</div>
-            <Input 
-                value={renameValue} 
-                onChange={e => setRenameValue(e.target.value)} 
-                onPressEnter={handleRenameOk}
-                autoFocus
-                placeholder="请输入空间名称"
-            />
-        </Modal>
-    </div>
-  );
-};
-
-const App = () => (
-  <ConfigProvider
-    theme={{
-      algorithm: theme.darkAlgorithm,
-      token: {
-        colorPrimary: '#177ddc',
-        borderRadius: 4,
-      },
-    }}
-  >
-    <AppContent />
-  </ConfigProvider>
-);
-
-export default App;
+  )
+}
