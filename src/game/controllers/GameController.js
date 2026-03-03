@@ -9,6 +9,8 @@ import { createExplosionSystem } from '../systems/explosionSystem'
 import { createLibrarySystem } from '../systems/librarySystem'
 import { createEnergyOrbSystem } from '../systems/energyOrbSystem'
 import { WAVE_REGISTRY, getNextUntriggeredWave, isRegisteredWaveEnemy } from '../waves/registry'
+import { updateWave1EnemyMotion } from '../waves/wave1'
+import { updateWave2EnemyMotion } from '../waves/wave2'
 import {
   FIRE_INTERVAL_BY_LEVEL,
   MISSILE_UNLOCK_RULE,
@@ -656,16 +658,10 @@ export class GameController {
         const enemy = enemySprites[i]
         const prevX = enemy.x
         const prevY = enemy.y
-        if (enemy.__motion?.type === 'snake') {
-          enemy.__motion.phase += enemy.__motion.angularSpeed * deltaSeconds
-          const wave = enemy.y * enemy.__motion.frequency + enemy.__motion.phase - enemy.__motion.segmentOffset
-          enemy.x = enemy.__motion.laneX + Math.sin(wave) * enemy.__motion.amplitude
-          enemy.y += enemyMoveSpeed * deltaSeconds
-        } else if (enemy.__motion?.type === 'diagonal') {
-          enemy.__motion.swayPhase = (enemy.__motion.swayPhase ?? 0) + deltaSeconds * (enemy.__motion.swaySpeed ?? 0)
-          enemy.__motion.queueOriginX += enemy.__motion.vx * deltaSeconds
-          enemy.x = enemy.__motion.queueOriginX + Math.sin(enemy.__motion.swayPhase) * (enemy.__motion.swayAmplitude ?? 0)
-          enemy.y += enemy.__motion.vy * deltaSeconds
+        if (updateWave1EnemyMotion({ enemy, deltaSeconds, moveSpeed: enemyMoveSpeed })) {
+          // 第一波专属轨迹在 wave1 文件内维护
+        } else if (updateWave2EnemyMotion({ enemy, deltaSeconds })) {
+          // 第二波专属轨迹在 wave2 文件内维护
         } else {
           enemy.y += enemyMoveSpeed * deltaSeconds
         }

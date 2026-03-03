@@ -47,6 +47,19 @@ export const spawnWave1 = ({ spawnEnemyById, stageWidth }) => {
   }
 }
 
+// 更新第一波敌机位移（蛇形下行）
+// 返回 true 表示已处理该敌机本帧运动
+export const updateWave1EnemyMotion = ({ enemy, deltaSeconds, moveSpeed }) => {
+  if (!isWave1Enemy(enemy)) return false
+
+  enemy.__motion.phase += enemy.__motion.angularSpeed * deltaSeconds
+  const wave = enemy.y * enemy.__motion.frequency + enemy.__motion.phase - enemy.__motion.segmentOffset
+  enemy.x = enemy.__motion.laneX + Math.sin(wave) * enemy.__motion.amplitude
+  enemy.y += moveSpeed * deltaSeconds
+
+  return true
+}
+
 // 判断某敌机是否属于第一波
 // 主循环用这个标识决定越界清理策略
 export const isWave1Enemy = (enemy) => enemy?.__motion?.waveId === 'wave1'

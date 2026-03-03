@@ -4,7 +4,7 @@ import { WAVE1 } from './wave1'
 // - 触发时机：500m
 // - 敌机类型：#15（与第一波一致）
 // - 尺寸/间距：沿用第一波（scale 与 spacingY）
-// - 路线：左右两路斜向直线下行，交叉成 X 路径
+// - 路线：左右两路大振幅正弦下行
 export const WAVE2 = {
   triggerMeter: 500, // 到达该里程触发第二波
   enemyId: WAVE1.enemyId, // 与第一波同款敌机
@@ -17,10 +17,10 @@ export const WAVE2 = {
     rightStartRatio: 0.78, // 右路起点 x 比例
   },
   diagonal: {
-    vx: 120, // 水平速度（像素/秒）
+    vx: 0, // 基线水平速度（像素/秒）
     vy: 120, // 垂直速度（像素/秒）
-    swayAmplitude: 0, // 设为 0，保证直线轨迹
-    swaySpeed: 0,
+    swayAmplitude: 260, // 大振幅正弦摆动
+    swaySpeed: 2.3, // 摆动速度
   },
   formation: {
     spacingX: 34, // 同一路队列的水平错位间距（更明显的斜列）
@@ -31,10 +31,23 @@ export const WAVE2 = {
 // 判断某敌机是否属于第二波
 export const isWave2Enemy = (enemy) => enemy?.__motion?.waveId === 'wave2'
 
+// 更新第二波敌机位移（双路大振幅正弦下行）
+// 返回 true 表示已处理该敌机本帧运动
+export const updateWave2EnemyMotion = ({ enemy, deltaSeconds }) => {
+  if (!isWave2Enemy(enemy)) return false
+
+  enemy.__motion.swayPhase = (enemy.__motion.swayPhase ?? 0) + deltaSeconds * (enemy.__motion.swaySpeed ?? 0)
+  enemy.__motion.queueOriginX += enemy.__motion.vx * deltaSeconds
+  enemy.x = enemy.__motion.queueOriginX + Math.sin(enemy.__motion.swayPhase) * (enemy.__motion.swayAmplitude ?? 0)
+  enemy.y += enemy.__motion.vy * deltaSeconds
+
+  return true
+}
+
 // 生成第二波：
 // 1) 按总数一分为二（左右两路）
-// 2) 左路从左上往右下，右路从右上往左下
-// 3) 两路会在屏幕中部附近交叉，形成 X 形
+// 2) 两路都沿各自基线向下，叠加大振幅正弦横摆
+// 3) 左右两路使用反相位，形成对称波动
 export const spawnWave2 = ({ spawnEnemyById, stageWidth }) => {
   const leftCount = Math.ceil(WAVE2.count / 2)
   const rightCount = WAVE2.count - leftCount
@@ -42,7 +55,7 @@ export const spawnWave2 = ({ spawnEnemyById, stageWidth }) => {
   const leftStartX = stageWidth * WAVE2.lanes.leftStartRatio
   const rightStartX = stageWidth * WAVE2.lanes.rightStartRatio
 
-  const spawnLane = ({ count, startX, vx }) => {
+  const spawnLane = ({ count, startX, vx, basePhase }) => {
     const dir = vx >= 0 ? 1 : -1
     for (let i = 0; i < count; i += 1) {
       const xOffset = i * WAVE2.formation.spacingX
@@ -58,7 +71,7 @@ export const spawnWave2 = ({ spawnEnemyById, stageWidth }) => {
         queueOriginX: spawnX, // 关键：每个敌机保留自己的 x 基线，避免下一帧被拉回同列
         swayAmplitude: WAVE2.diagonal.swayAmplitude,
         swaySpeed: WAVE2.diagonal.swaySpeed,
-        swayPhase: 0,
+        swayPhase: basePhase + i * 0.22,
         waveId: 'wave2',
       })
     }
@@ -68,11 +81,13 @@ export const spawnWave2 = ({ spawnEnemyById, stageWidth }) => {
     count: leftCount,
     startX: leftStartX,
     vx: WAVE2.diagonal.vx,
+    basePhase: 0,
   })
 
   spawnLane({
     count: rightCount,
     startX: rightStartX,
     vx: -WAVE2.diagonal.vx,
+    basePhase: Math.PI,
   })
 }
