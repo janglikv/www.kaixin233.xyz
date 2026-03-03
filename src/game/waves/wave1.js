@@ -6,7 +6,7 @@
 export const WAVE1 = {
   triggerMeter: 100, // 到达该里程后触发本波
   enemyId: 15, // 使用敌机雪碧图编号 #15
-  count: 20, // 本波总敌机数量
+  count: 28, // 本波总敌机数量
   initialRoute: {
     laneRatio: 0.5, // 出生车道比例（0~1，0.5 表示屏幕中线）
     spawnY: -80, // 第一架的初始 Y（在屏幕上方）
@@ -14,10 +14,10 @@ export const WAVE1 = {
     scale: 0.165, // 敌机缩放
     motion: {
       type: 'snake', // 运动类型：蛇形
-      amplitude: 48, // 蛇形左右摆动振幅（像素）
-      angularSpeed: 3.1, // 相位变化速度（越大摆动越快）
+      amplitude: 28, // 蛇形左右摆动振幅（像素）
+      angularSpeed: 1.1, // 相位变化速度（越大摆动越快）
       phase: 0, // 初始相位
-      frequency: 0.036, // y 到波形的频率映射（影响蛇形“密度”）
+      frequency: 0.066, // y 到波形的频率映射（影响蛇形“密度”）
       segmentOffsetStep: 0.36, // 相邻敌机的相位偏移步长（形成队列层次）
     },
   },

@@ -398,6 +398,10 @@ export class GameController {
           vx: options.vx ?? 0,
           vy: options.vy ?? enemyMoveSpeed,
           waveId: options.waveId ?? null,
+          queueOriginX: options.queueOriginX ?? enemy.x,
+          swayAmplitude: options.swayAmplitude ?? 0,
+          swaySpeed: options.swaySpeed ?? 0,
+          swayPhase: options.swayPhase ?? 0,
         }
       }
 
@@ -650,6 +654,8 @@ export class GameController {
       // 敌机更新：按 motion 类型执行轨迹，越界后按策略清理
       for (let i = enemySprites.length - 1; i >= 0; i -= 1) {
         const enemy = enemySprites[i]
+        const prevX = enemy.x
+        const prevY = enemy.y
         if (enemy.__motion?.type === 'snake') {
           enemy.__motion.phase += enemy.__motion.angularSpeed * deltaSeconds
           const wave = enemy.y * enemy.__motion.frequency + enemy.__motion.phase - enemy.__motion.segmentOffset
@@ -662,6 +668,13 @@ export class GameController {
           enemy.y += enemy.__motion.vy * deltaSeconds
         } else {
           enemy.y += enemyMoveSpeed * deltaSeconds
+        }
+
+        // 让敌机“头朝行进方向”
+        const moveDX = enemy.x - prevX
+        const moveDY = enemy.y - prevY
+        if ((moveDX * moveDX + moveDY * moveDY) > 1e-6) {
+          enemy.rotation = Math.atan2(moveDY, moveDX) + Math.PI / 2
         }
 
         const waveEnemyOffscreen = isRegisteredWaveEnemy(enemy) && (

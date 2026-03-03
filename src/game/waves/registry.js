@@ -23,8 +23,8 @@ export const WAVE_REGISTRY = [
   {
     id: 'wave2',
     config: WAVE2,
-    getNextText: () => `${WAVE2.triggerMeter}m -> #${WAVE2.enemyId} x${WAVE2.groupSize * 2} (diag-loop)`,
-    getSpawnInfo: () => `${WAVE2.triggerMeter}m:#${WAVE2.enemyId}x${WAVE2.groupSize * 2}(diag-loop)`,
+    getNextText: () => `${WAVE2.triggerMeter}m -> #${WAVE2.enemyId} x${WAVE2.count} (x-diagonal)`,
+    getSpawnInfo: () => `${WAVE2.triggerMeter}m:#${WAVE2.enemyId}x${WAVE2.count}(x-diagonal)`,
     spawn: spawnWave2,
     isEnemy: isWave2Enemy,
   },
