@@ -47,10 +47,10 @@ export class GameController {
     this.started = true
     this.destroyed = false
 
-    let disposed = false
-    let initialized = false
-    const app = new PIXI.Application()
-    const pressedKeys = new Set()
+    let disposed = false // 是否已进入清理流程
+    let initialized = false // Pixi 是否完成 init
+    const app = new PIXI.Application() // Pixi 应用实例
+    const pressedKeys = new Set() // 当前按下的移动键集合（w/a/s/d）
 
     // ===== 运行时容器数据 =====
     // 像素级碰撞掩码缓存（key: sprite）
@@ -61,58 +61,58 @@ export class GameController {
     const missileSprites = []
 
     // ===== 核心数值配置 =====
-    const heroSpeed = 420
-    const enemyMoveSpeed = 120
-    const bulletSpeed = 640
-    const blinkInterval = 0.1
-    const blinkTotalToggles = 6
-    const travelSpeedMps = 48
+    const heroSpeed = 420 // 主角移动速度（像素/秒）
+    const enemyMoveSpeed = 120 // 敌机默认下行速度（像素/秒）
+    const bulletSpeed = 640 // 主炮子弹初始速度（像素/秒）
+    const blinkInterval = 0.1 // 受击闪烁每次切换间隔（秒）
+    const blinkTotalToggles = 6 // 闪烁总切换次数（6 次约等于闪 3 下）
+    const travelSpeedMps = 48 // 行进系统里程推进速度（米/秒）
 
     // ===== 场景节点引用 =====
-    let hero = null
-    let worldLayer = null
-    let enemyContainer = null
-    let bulletContainer = null
-    let missileContainer = null
-    let resizeHandler = null
+    let hero = null // 主角精灵
+    let worldLayer = null // 世界主层（承载主角、敌机、子弹等）
+    let enemyContainer = null // 敌机容器层
+    let bulletContainer = null // 主炮子弹容器层
+    let missileContainer = null // 导弹容器层
+    let resizeHandler = null // renderer 尺寸变化回调引用（用于解绑）
 
     // ===== 工厂函数引用（init 后赋值） =====
-    let spawnHeroBullet = null
-    let spawnHomingMissiles = null
-    let spawnEnemyById = null
+    let spawnHeroBullet = null // 主炮发射函数
+    let spawnHomingMissiles = null // 导弹发射函数（含末端制导参数）
+    let spawnEnemyById = null // 通用敌机生成函数（按 #ID + 运动参数）
 
     // ===== 战斗状态 =====
-    let elapsedGameTime = 0
-    let nextFireTime = 0
-    let nextMissileFireTime = 0
-    let isFiring = false
-    let keyboardFiring = false
-    let mouseFiring = false
+    let elapsedGameTime = 0 // 累计游戏时间（秒）
+    let nextFireTime = 0 // 主炮下次可发射时间点（秒）
+    let nextMissileFireTime = 0 // 导弹下次可发射时间点（秒）
+    let isFiring = false // 是否处于持续开火状态（键鼠合并态）
+    let keyboardFiring = false // 键盘开火态（空格）
+    let mouseFiring = false // 鼠标开火态（左键）
 
-    let isBlinking = false
-    let blinkElapsed = 0
-    let blinkToggleCount = 0
+    let isBlinking = false // 主角是否处于受击闪烁中
+    let blinkElapsed = 0 // 闪烁累计时间
+    let blinkToggleCount = 0 // 已完成闪烁切换次数
 
     // ===== 里程与刷怪状态 =====
-    let traveledMeters = 0
-    let lastSpawnInfo = '无'
-    const triggeredWaveIds = new Set()
+    let traveledMeters = 0 // 当前累计里程（米）
+    let lastSpawnInfo = '无' // HUD 上显示的最近刷怪信息
+    const triggeredWaveIds = new Set() // 已触发波次 ID 集合
 
     // ===== 子系统实例 =====
     let starfieldSystem = null
     let explosionSystem = null
     let energyOrbSystem = null
-    let energyCount = 0
-    let weaponLevel = 1
-    let currentWeapon = WEAPON_IDS.GUN
-    const heroGlobalPoint = new PIXI.Point()
-    const enemyGlobalPoint = new PIXI.Point(0, 0)
-    let unlockKillCount = 0
-    let missileWeaponUnlocked = false
-    let weaponCardDropped = false
-    let weaponCard = null
-    let hudNoticeText = null
-    let hudNoticeUntil = 0
+    let energyCount = 0 // 当前持有能量豆数量
+    let weaponLevel = 1 // 当前武器等级（1~3）
+    let currentWeapon = WEAPON_IDS.GUN // 当前激活武器 ID
+    const heroGlobalPoint = new PIXI.Point() // 复用：主角全局坐标缓存
+    const enemyGlobalPoint = new PIXI.Point(0, 0) // 复用：敌机全局坐标缓存
+    let unlockKillCount = 0 // 解锁导弹所需目标击杀计数
+    let missileWeaponUnlocked = false // 导弹武器是否已解锁
+    let weaponCardDropped = false // 是否已经掉落过导弹武器卡
+    let weaponCard = null // 场上武器卡精灵引用
+    let hudNoticeText = null // 居中提示文本对象
+    let hudNoticeUntil = 0 // 提示文本显示截止时间
 
     // 玩家与敌机碰撞后，触发短时间闪烁（无敌感反馈）
     const startHeroBlink = () => {
@@ -127,7 +127,7 @@ export class GameController {
     // - 输入来源：空格 + 鼠标左键
     // - 支持按下第一时间发射（并受间隔控制）
     const syncFiringState = () => {
-      const nextFiring = keyboardFiring || mouseFiring
+      const nextFiring = keyboardFiring || mouseFiring // 任一输入源激活即视为开火
       if (nextFiring && !isFiring) {
         isFiring = true
         if (currentWeapon === WEAPON_IDS.GUN) {
@@ -150,12 +150,12 @@ export class GameController {
 
     // 键盘按下处理：移动、开火、切枪、升级、跳波次
     const handleKeyDown = (event) => {
-      const key = event.key.toLowerCase()
+      const key = event.key.toLowerCase() // 统一小写处理，便于比较
       if (['w', 'a', 's', 'd'].includes(key)) {
         pressedKeys.add(key)
       }
       if (event.code === 'Slash' && !event.repeat) {
-        const nextWave = getNextUntriggeredWave(triggeredWaveIds)
+        const nextWave = getNextUntriggeredWave(triggeredWaveIds) // 下一波未触发波次
         if (nextWave) {
           traveledMeters = Math.max(traveledMeters, nextWave.config.triggerMeter)
         }
@@ -219,8 +219,8 @@ export class GameController {
     // 主角边界钳制：避免飞出屏幕
     const clampHeroToScreen = () => {
       if (!hero) return
-      const halfWidth = hero.width / 2
-      const halfHeight = hero.height / 2
+      const halfWidth = hero.width / 2 // 主角半宽
+      const halfHeight = hero.height / 2 // 主角半高
       hero.x = Math.max(halfWidth, Math.min(app.renderer.width - halfWidth, hero.x))
       hero.y = Math.max(halfHeight, Math.min(app.renderer.height - halfHeight, hero.y))
     }
@@ -320,7 +320,7 @@ export class GameController {
     // 主炮发射：按等级生成多轨道子弹
     spawnHeroBullet = () => {
       if (!hero) return
-      const tracks = getTracksByLevel(weaponLevel)
+      const tracks = getTracksByLevel(weaponLevel) // 当前等级对应弹道偏移列表
       for (const offsetX of tracks) {
         const bullet = new PIXI.Sprite(bulletTexture)
         bullet.anchor.set(0.5)
@@ -334,7 +334,7 @@ export class GameController {
     // 导弹发射：先直线飞行，再末端制导
     spawnHomingMissiles = () => {
       if (!hero) return
-      const tracks = getTracksByLevel(weaponLevel)
+      const tracks = getTracksByLevel(weaponLevel) // 当前等级对应导弹弹道偏移
       for (const offsetX of tracks) {
         const missile = new PIXI.Sprite(missileTexture)
         missile.anchor.set(0.25, 0.5)
@@ -370,10 +370,10 @@ export class GameController {
 
     // 统一敌机生成入口：按 enemyId 取纹理，并注入运动参数
     spawnEnemyById = (enemyId, options = {}) => {
-      const idx = enemyId - 1
+      const idx = enemyId - 1 // #1 映射到数组索引 0
       if (idx < 0 || idx >= enemyTextures.length) return null
 
-      const frame = ENEMY_FRAMES[idx]
+      const frame = ENEMY_FRAMES[idx] // 敌机在雪碧图中的切片数据
       const enemy = new PIXI.Sprite(enemyTextures[idx])
       enemy.__enemyId = enemyId
       enemy.anchor.set(0.5)
@@ -441,7 +441,7 @@ export class GameController {
 
     // HUD 更新：行进信息、里程、武器等级、解锁进度
     const updateRouteHud = () => {
-      const nextWave = getNextUntriggeredWave(triggeredWaveIds)
+      const nextWave = getNextUntriggeredWave(triggeredWaveIds) // HUD 下一个里程目标
       const nextText = nextWave ? nextWave.getNextText() : '已完成'
       const nextUpgrade = weaponLevel < 3 ? `Lv${weaponLevel + 1}:${WEAPON_UPGRADE_COST[weaponLevel + 1]}` : 'MAX'
       const weaponName = WEAPON_DISPLAY_NAME[currentWeapon]
@@ -517,21 +517,21 @@ export class GameController {
     app.ticker.add(() => {
       if (!hero || !spawnEnemyById) return
 
-      const deltaSeconds = app.ticker.deltaMS / 1000
-      const stageW = app.renderer.width
-      const stageH = app.renderer.height
+      const deltaSeconds = app.ticker.deltaMS / 1000 // 本帧耗时（秒）
+      const stageW = app.renderer.width // 当前画布宽度
+      const stageH = app.renderer.height // 当前画布高度
 
       elapsedGameTime += deltaSeconds
 
-      let moveX = 0
-      let moveY = 0
+      let moveX = 0 // 水平输入方向（-1/0/1）
+      let moveY = 0 // 垂直输入方向（-1/0/1）
       if (pressedKeys.has('a')) moveX -= 1
       if (pressedKeys.has('d')) moveX += 1
       if (pressedKeys.has('w')) moveY -= 1
       if (pressedKeys.has('s')) moveY += 1
 
       if (moveX !== 0 || moveY !== 0) {
-        const length = Math.hypot(moveX, moveY)
+        const length = Math.hypot(moveX, moveY) // 归一化长度，保证斜向速度一致
         hero.x += (moveX / length) * heroSpeed * deltaSeconds
         hero.y += (moveY / length) * heroSpeed * deltaSeconds
         clampHeroToScreen()
@@ -588,8 +588,8 @@ export class GameController {
         }
 
         if (!missile.lockedTarget && missile.travelDistance >= missile.armingDistance) {
-          let nearest = null
-          let nearestDistSq = missile.terminalRange * missile.terminalRange
+          let nearest = null // 末端制导候选目标
+          let nearestDistSq = missile.terminalRange * missile.terminalRange // 最近距离平方阈值
           for (const enemy of enemySprites) {
             const dx = enemy.x - missile.sprite.x
             const dy = enemy.y - missile.sprite.y
@@ -602,16 +602,16 @@ export class GameController {
           missile.lockedTarget = nearest
         }
 
-        let angle = Math.atan2(missile.vy, missile.vx)
+        let angle = Math.atan2(missile.vy, missile.vx) // 当前速度向量角度
         if (missile.lockedTarget) {
           const desiredAngle = Math.atan2(
             missile.lockedTarget.y - missile.sprite.y,
             missile.lockedTarget.x - missile.sprite.x,
-          )
-          let delta = desiredAngle - angle
+          ) // 指向目标的理想角度
+          let delta = desiredAngle - angle // 角度差（待约束到 -PI~PI）
           while (delta > Math.PI) delta -= Math.PI * 2
           while (delta < -Math.PI) delta += Math.PI * 2
-          const maxTurn = missile.turnRate * deltaSeconds
+          const maxTurn = missile.turnRate * deltaSeconds // 本帧最大可转向角
           delta = Math.max(-maxTurn, Math.min(maxTurn, delta))
           angle += delta
         }
@@ -634,7 +634,7 @@ export class GameController {
         }
 
         const missileBounds = missile.sprite.getBounds()
-        let hitEnemyIndex = -1
+        let hitEnemyIndex = -1 // 导弹命中的敌机索引（-1 表示未命中）
         for (let ei = enemySprites.length - 1; ei >= 0; ei -= 1) {
           if (boundsOverlap(missileBounds, enemySprites[ei].getBounds())) {
             hitEnemyIndex = ei
@@ -683,7 +683,7 @@ export class GameController {
       for (let bi = bulletSprites.length - 1; bi >= 0; bi -= 1) {
         const bullet = bulletSprites[bi]
         const bulletBounds = bullet.getBounds()
-        let hit = false
+        let hit = false // 当前子弹是否已命中敌机
 
         for (let ei = enemySprites.length - 1; ei >= 0; ei -= 1) {
           const enemy = enemySprites[ei]
@@ -712,8 +712,8 @@ export class GameController {
       // 武器卡拾取判定：解锁导弹武器并提示
       if (weaponCard && hero) {
         weaponCard.rotation += deltaSeconds * 1.8
-        const dx = hero.x - weaponCard.x
-        const dy = hero.y - weaponCard.y
+        const dx = hero.x - weaponCard.x // 玩家到卡片的 x 轴距离
+        const dy = hero.y - weaponCard.y // 玩家到卡片的 y 轴距离
         if ((dx * dx + dy * dy) <= 44 * 44) {
           worldLayer.removeChild(weaponCard)
           weaponCard.destroy()
