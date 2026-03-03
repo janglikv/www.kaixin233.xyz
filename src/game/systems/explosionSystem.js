@@ -1,5 +1,10 @@
 import * as PIXI from 'pixi.js'
 
+// 爆炸特效系统：
+// 1) 火花/碎片粒子
+// 2) 爆闪
+// 3) 空间扭曲涟漪（位移贴图）
+// 4) 轻微屏幕震动
 export const createExplosionSystem = (app, worldLayer) => {
   const explosionParticles = []
   const blastFlashes = []
@@ -13,6 +18,7 @@ export const createExplosionSystem = (app, worldLayer) => {
   fxContainer.zIndex = 40
   worldLayer.addChild(fxContainer)
 
+  // 火花纹理
   const sparkShape = new PIXI.Graphics()
   sparkShape
     .circle(3, 3, 3)
@@ -21,6 +27,7 @@ export const createExplosionSystem = (app, worldLayer) => {
   const sparkTexture = app.renderer.generateTexture(sparkShape)
   sparkShape.destroy()
 
+  // 碎片纹理
   const shardShape = new PIXI.Graphics()
   shardShape
     .roundRect(0, 0, 16, 4, 2)
@@ -29,12 +36,14 @@ export const createExplosionSystem = (app, worldLayer) => {
   const shardTexture = app.renderer.generateTexture(shardShape)
   shardShape.destroy()
 
+  // 爆闪纹理
   const flashShape = new PIXI.Graphics()
   flashShape.circle(36, 36, 30).fill({ color: 0xffb34d, alpha: 0.75 })
   flashShape.circle(36, 36, 18).fill({ color: 0xffffff, alpha: 0.9 })
   const flashTexture = app.renderer.generateTexture(flashShape)
   flashShape.destroy()
 
+  // 生成位移贴图：中心向外的径向偏移
   const createRippleDisplacementTexture = (size = 256) => {
     const canvas = document.createElement('canvas')
     canvas.width = size
@@ -78,15 +87,18 @@ export const createExplosionSystem = (app, worldLayer) => {
     return PIXI.Texture.from(canvas)
   }
 
+  // 位移贴图容器独立挂在 stage，避免被 worldLayer 的滤镜重复影响
   const distortionMapContainer = new PIXI.Container()
   distortionMapContainer.zIndex = 30
   app.stage.addChild(distortionMapContainer)
   const distortionTexture = createRippleDisplacementTexture(256)
 
+  // 刷新世界层滤镜列表（支持多重涟漪叠加）
   const refreshWorldFilters = () => {
     worldLayer.filters = activeDistortionFilters.length > 0 ? [...activeDistortionFilters] : null
   }
 
+  // 在指定位置生成一圈空间扭曲
   const spawnDistortionRipple = (x, y) => {
     const mapSprite = new PIXI.Sprite(distortionTexture)
     mapSprite.anchor.set(0.5)
@@ -113,10 +125,13 @@ export const createExplosionSystem = (app, worldLayer) => {
     })
   }
 
+  // 触发爆炸：组合多种视觉层
   const spawn = (x, y) => {
+    // 震屏参数
     shakeTime = Math.max(shakeTime, 0.16)
     shakeStrength = Math.max(shakeStrength, 7)
 
+    // 爆闪
     const flash = new PIXI.Sprite(flashTexture)
     flash.anchor.set(0.5)
     flash.position.set(x, y)
@@ -132,6 +147,7 @@ export const createExplosionSystem = (app, worldLayer) => {
       endScale: 1.8,
     })
 
+    // 主火花
     const sparkCount = 42
     for (let i = 0; i < sparkCount; i += 1) {
       const particle = new PIXI.Sprite(sparkTexture)
@@ -162,6 +178,7 @@ export const createExplosionSystem = (app, worldLayer) => {
       })
     }
 
+    // 爆炸碎片
     const shardCount = 16
     for (let i = 0; i < shardCount; i += 1) {
       const shard = new PIXI.Sprite(shardTexture)
@@ -192,8 +209,10 @@ export const createExplosionSystem = (app, worldLayer) => {
       })
     }
 
+    // 空间涟漪
     spawnDistortionRipple(x, y)
 
+    // 冷色烟雾层，补足爆炸体积感
     for (let i = 0; i < 12; i += 1) {
       const haze = new PIXI.Sprite(sparkTexture)
       const angle = (i / 12) * Math.PI * 2 + Math.random() * 0.25
@@ -224,10 +243,12 @@ export const createExplosionSystem = (app, worldLayer) => {
     }
   }
 
+  // 画布变化时更新滤镜有效区域
   const layout = () => {
     worldLayer.filterArea = new PIXI.Rectangle(0, 0, app.renderer.width, app.renderer.height)
   }
 
+  // 每帧更新：推进粒子、闪光、涟漪与震屏状态
   const update = (deltaSeconds) => {
     for (let i = explosionParticles.length - 1; i >= 0; i -= 1) {
       const particle = explosionParticles[i]
@@ -301,6 +322,7 @@ export const createExplosionSystem = (app, worldLayer) => {
       ripple.filter.scale.y = strength
     }
 
+    // 轻微随机位移实现震屏
     if (shakeTime > 0) {
       shakeTime = Math.max(0, shakeTime - deltaSeconds)
       const k = shakeTime / 0.16

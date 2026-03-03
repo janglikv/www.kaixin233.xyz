@@ -1,7 +1,7 @@
 import * as PIXI from 'pixi.js'
 import heroPng from '../../assets/hero.png'
 import enemyPng from '../../assets/enemy.png'
-import { ENEMY_FRAMES, ROUTE_PLAN } from '../config'
+import { ENEMY_FRAMES } from '../config'
 import { buildAlphaMaskFromImage, loadImageElement } from '../utils/image'
 import { boundsOverlap, pixelPerfectCollides } from '../utils/collision'
 import { createStarfieldSystem } from '../systems/starfieldSystem'
@@ -18,16 +18,24 @@ import {
   getTracksByLevel,
 } from '../weapons/registry'
 
+// 游戏主控制器：
+// - 管理 Pixi 生命周期（init / update / destroy）
+// - 串联输入、移动、射击、碰撞、波次、掉落、HUD
+// - 对 React 层暴露最小接口（start / destroy / setLibraryVisible）
 export class GameController {
   constructor(container, options = {}) {
+    // 外部传入的 DOM 挂载点
     this.container = container
+    // 初始资料库可见性（由 React 状态传入）
     this.showLibrary = options.showLibrary ?? false
+    // 清理函数：start 成功后创建，用于统一释放资源
     this.cleanupFn = null
     this.started = false
     this.destroyed = false
     this.librarySystem = null
   }
 
+  // 切换资料库显示（React -> Pixi 单向同步）
   setLibraryVisible(visible) {
     this.showLibrary = visible
     this.librarySystem?.setVisible(visible)
@@ -44,18 +52,23 @@ export class GameController {
     const app = new PIXI.Application()
     const pressedKeys = new Set()
 
+    // ===== 运行时容器数据 =====
+    // 像素级碰撞掩码缓存（key: sprite）
     const alphaMasks = new WeakMap()
+    // 场上实体数组（统一由主循环维护）
     const enemySprites = []
     const bulletSprites = []
     const missileSprites = []
 
-    const heroSpeed = 280
+    // ===== 核心数值配置 =====
+    const heroSpeed = 420
     const enemyMoveSpeed = 120
     const bulletSpeed = 640
     const blinkInterval = 0.1
     const blinkTotalToggles = 6
     const travelSpeedMps = 48
 
+    // ===== 场景节点引用 =====
     let hero = null
     let worldLayer = null
     let enemyContainer = null
@@ -63,10 +76,12 @@ export class GameController {
     let missileContainer = null
     let resizeHandler = null
 
+    // ===== 工厂函数引用（init 后赋值） =====
     let spawnHeroBullet = null
     let spawnHomingMissiles = null
     let spawnEnemyById = null
 
+    // ===== 战斗状态 =====
     let elapsedGameTime = 0
     let nextFireTime = 0
     let nextMissileFireTime = 0
@@ -78,13 +93,12 @@ export class GameController {
     let blinkElapsed = 0
     let blinkToggleCount = 0
 
+    // ===== 里程与刷怪状态 =====
     let traveledMeters = 0
-    let routeCursor = 0
     let lastSpawnInfo = '无'
-
-    const routePlan = [...ROUTE_PLAN].sort((a, b) => a.meter - b.meter)
     const triggeredWaveIds = new Set()
 
+    // ===== 子系统实例 =====
     let starfieldSystem = null
     let explosionSystem = null
     let energyOrbSystem = null
@@ -100,6 +114,7 @@ export class GameController {
     let hudNoticeText = null
     let hudNoticeUntil = 0
 
+    // 玩家与敌机碰撞后，触发短时间闪烁（无敌感反馈）
     const startHeroBlink = () => {
       if (!hero || isBlinking) return
       isBlinking = true
@@ -108,6 +123,9 @@ export class GameController {
       hero.alpha = 0.25
     }
 
+    // 同步“是否处于持续开火”状态：
+    // - 输入来源：空格 + 鼠标左键
+    // - 支持按下第一时间发射（并受间隔控制）
     const syncFiringState = () => {
       const nextFiring = keyboardFiring || mouseFiring
       if (nextFiring && !isFiring) {
@@ -130,6 +148,7 @@ export class GameController {
       }
     }
 
+    // 键盘按下处理：移动、开火、切枪、升级、跳波次
     const handleKeyDown = (event) => {
       const key = event.key.toLowerCase()
       if (['w', 'a', 's', 'd'].includes(key)) {
@@ -164,6 +183,7 @@ export class GameController {
       }
     }
 
+    // 键盘抬起处理：结束移动/开火
     const handleKeyUp = (event) => {
       const key = event.key.toLowerCase()
       if (['w', 'a', 's', 'd'].includes(key)) {
@@ -175,24 +195,28 @@ export class GameController {
       }
     }
 
+    // 鼠标按下：开启持续开火
     const handleMouseDown = (event) => {
       if (event.button !== 0) return
       mouseFiring = true
       syncFiringState()
     }
 
+    // 鼠标抬起：关闭持续开火
     const handleMouseUp = (event) => {
       if (event.button !== 0) return
       mouseFiring = false
       syncFiringState()
     }
 
+    // 窗口失焦：重置输入，防止“切出后仍持续开火/移动”
     const handleWindowBlur = () => {
       keyboardFiring = false
       mouseFiring = false
       syncFiringState()
     }
 
+    // 主角边界钳制：避免飞出屏幕
     const clampHeroToScreen = () => {
       if (!hero) return
       const halfWidth = hero.width / 2
@@ -201,14 +225,14 @@ export class GameController {
       hero.y = Math.max(halfHeight, Math.min(app.renderer.height - halfHeight, hero.y))
     }
 
+    // 导弹销毁工具：统一删除容器与数组，避免泄漏
     const removeMissile = (missileData, index) => {
       missileContainer.removeChild(missileData.sprite)
       missileData.sprite.destroy()
       missileSprites.splice(index, 1)
     }
 
-    WAVE_REGISTRY.forEach((wave) => wave.reset?.())
-
+    // Pixi v8 初始化：必须先 init 再访问 renderer/canvas
     await app.init({
       background: '#09131f',
       antialias: true,
@@ -223,6 +247,7 @@ export class GameController {
       return
     }
 
+    // 挂载画布
     this.container.appendChild(app.canvas)
     app.stage.sortableChildren = true
 
@@ -230,6 +255,7 @@ export class GameController {
     worldLayer.zIndex = 0
     app.stage.addChild(worldLayer)
 
+    // 创建子系统
     starfieldSystem = createStarfieldSystem(app, worldLayer)
     explosionSystem = createExplosionSystem(app, worldLayer)
     energyOrbSystem = createEnergyOrbSystem(app)
@@ -291,6 +317,7 @@ export class GameController {
     const weaponCardTexture = app.renderer.generateTexture(weaponCardShape)
     weaponCardShape.destroy()
 
+    // 主炮发射：按等级生成多轨道子弹
     spawnHeroBullet = () => {
       if (!hero) return
       const tracks = getTracksByLevel(weaponLevel)
@@ -304,6 +331,7 @@ export class GameController {
       }
     }
 
+    // 导弹发射：先直线飞行，再末端制导
     spawnHomingMissiles = () => {
       if (!hero) return
       const tracks = getTracksByLevel(weaponLevel)
@@ -340,6 +368,7 @@ export class GameController {
     enemyContainer.zIndex = 10
     worldLayer.addChild(enemyContainer)
 
+    // 统一敌机生成入口：按 enemyId 取纹理，并注入运动参数
     spawnEnemyById = (enemyId, options = {}) => {
       const idx = enemyId - 1
       if (idx < 0 || idx >= enemyTextures.length) return null
@@ -361,7 +390,6 @@ export class GameController {
           phase: options.phase ?? 0,
           frequency: options.frequency ?? 0.032,
           segmentOffset: options.segmentOffset ?? 0,
-          recycleLaneIndex: options.recycleLaneIndex ?? 0,
           waveId: options.waveId ?? null,
         }
       } else if (options.motionType === 'diagonal') {
@@ -370,7 +398,6 @@ export class GameController {
           vx: options.vx ?? 0,
           vy: options.vy ?? enemyMoveSpeed,
           waveId: options.waveId ?? null,
-          parked: false,
         }
       }
 
@@ -412,27 +439,27 @@ export class GameController {
     hudNoticeText.visible = false
     app.stage.addChild(hudNoticeText)
 
+    // HUD 更新：行进信息、里程、武器等级、解锁进度
     const updateRouteHud = () => {
-      const nextPlan = routePlan[routeCursor]
       const nextWave = getNextUntriggeredWave(triggeredWaveIds)
-      const nextText = nextPlan
-        ? `${nextPlan.meter}m -> #${nextPlan.enemyId}`
-        : (nextWave ? nextWave.getNextText() : '已完成')
+      const nextText = nextWave ? nextWave.getNextText() : '已完成'
       const nextUpgrade = weaponLevel < 3 ? `Lv${weaponLevel + 1}:${WEAPON_UPGRADE_COST[weaponLevel + 1]}` : 'MAX'
       const weaponName = WEAPON_DISPLAY_NAME[currentWeapon]
       const unlockText = missileWeaponUnlocked
         ? '导弹已解锁(Q切换)'
         : `导弹解锁:#${MISSILE_UNLOCK_RULE.enemyId} ${unlockKillCount}/${MISSILE_UNLOCK_RULE.killCount}`
       routeHudText.text = `行进管理 速度:${travelSpeedMps.toFixed(0)}m/s | 里程:${traveledMeters.toFixed(1)}m | 下个:${nextText} | 最近:${lastSpawnInfo} | 能量:${energyCount} | 武器:${weaponName} Lv${weaponLevel} | 升级(V):${nextUpgrade} | ${unlockText}`
-      routeHudText.position.set(170, 14)
+      routeHudText.position.set(170, Math.max(14, app.renderer.height - 34))
       if (hudNoticeText) {
-        hudNoticeText.position.set(app.renderer.width / 2, 56)
+        hudNoticeText.position.set(app.renderer.width / 2, Math.max(14, app.renderer.height - 86))
       }
     }
     updateRouteHud()
 
+    // 创建资料库系统，并同步 React 当前状态
     this.librarySystem = createLibrarySystem(app, enemyTextures, this.showLibrary)
 
+    // 分辨率变化时统一重排
     const layout = () => {
       clampHeroToScreen()
       starfieldSystem.layout()
@@ -451,13 +478,14 @@ export class GameController {
     window.addEventListener('mouseup', handleMouseUp)
     window.addEventListener('blur', handleWindowBlur)
 
+    // 击毁敌机：爆炸、掉豆、波次回调、解锁统计
     const removeEnemy = (enemy, enemyIndex) => {
       explosionSystem.spawn(enemy.x, enemy.y)
       const enemyGlobal = enemy.getGlobalPosition(enemyGlobalPoint)
       energyOrbSystem.spawn(enemyGlobal.x, enemyGlobal.y)
       enemyContainer.removeChild(enemy)
       alphaMasks.delete(enemy)
-      WAVE_REGISTRY.forEach((wave) => wave.onEnemyDestroyed(enemy))
+      WAVE_REGISTRY.forEach((wave) => wave.onEnemyDestroyed?.(enemy))
 
       if (enemy.__enemyId === MISSILE_UNLOCK_RULE.enemyId) {
         unlockKillCount += 1
@@ -475,6 +503,17 @@ export class GameController {
       enemySprites.splice(enemyIndex, 1)
     }
 
+    // 越界清理敌机（非击毁）：不触发爆炸与掉豆
+    const despawnEnemy = (enemy, enemyIndex) => {
+      enemyContainer.removeChild(enemy)
+      alphaMasks.delete(enemy)
+      WAVE_REGISTRY.forEach((wave) => wave.onEnemyDestroyed?.(enemy))
+      enemy.destroy()
+      enemySprites.splice(enemyIndex, 1)
+    }
+
+    // ===== 主循环 =====
+    // 顺序：输入移动 -> 开火 -> 触发波次 -> 更新子弹/导弹/敌机 -> 碰撞 -> 特效/HUD
     app.ticker.add(() => {
       if (!hero || !spawnEnemyById) return
 
@@ -515,13 +554,7 @@ export class GameController {
 
       traveledMeters += travelSpeedMps * deltaSeconds
 
-      while (routeCursor < routePlan.length && traveledMeters >= routePlan[routeCursor].meter) {
-        const plan = routePlan[routeCursor]
-        spawnEnemyById(plan.enemyId)
-        lastSpawnInfo = `${plan.meter}m:#${plan.enemyId}`
-        routeCursor += 1
-      }
-
+      // 里程触发波次：每波只触发一次
       for (const wave of WAVE_REGISTRY) {
         if (triggeredWaveIds.has(wave.id)) continue
         if (traveledMeters < wave.config.triggerMeter) continue
@@ -546,6 +579,7 @@ export class GameController {
         }
       }
 
+      // 导弹更新：目标锁定、转向、推进、命中判定
       for (let mi = missileSprites.length - 1; mi >= 0; mi -= 1) {
         const missile = missileSprites[mi]
         const target = missile.lockedTarget
@@ -613,12 +647,9 @@ export class GameController {
         }
       }
 
+      // 敌机更新：按 motion 类型执行轨迹，越界后按策略清理
       for (let i = enemySprites.length - 1; i >= 0; i -= 1) {
         const enemy = enemySprites[i]
-        if (isRegisteredWaveEnemy(enemy) && enemy.__motion?.parked) {
-          continue
-        }
-
         if (enemy.__motion?.type === 'snake') {
           enemy.__motion.phase += enemy.__motion.angularSpeed * deltaSeconds
           const wave = enemy.y * enemy.__motion.frequency + enemy.__motion.phase - enemy.__motion.segmentOffset
@@ -633,30 +664,22 @@ export class GameController {
           enemy.y += enemyMoveSpeed * deltaSeconds
         }
 
-        let recycled = false
-        for (const wave of WAVE_REGISTRY) {
-          if (recycled) break
-          recycled = wave.recycle({
-            enemy,
-            stageWidth: stageW,
-            stageHeight: stageH,
-            nowSeconds: elapsedGameTime,
-          })
+        const waveEnemyOffscreen = isRegisteredWaveEnemy(enemy) && (
+          enemy.y > stageH + enemy.height
+          || enemy.x < -enemy.width
+          || enemy.x > stageW + enemy.width
+        )
+        if (waveEnemyOffscreen) {
+          despawnEnemy(enemy, i)
+          continue
         }
 
-        if (!recycled && enemy.y > stageH + enemy.height) {
+        if (enemy.y > stageH + enemy.height) {
           enemy.y = -enemy.height - Math.random() * 80
         }
       }
 
-      WAVE_REGISTRY.forEach((wave) => {
-        wave.update?.({
-          stageWidth: stageW,
-          stageHeight: stageH,
-          nowSeconds: elapsedGameTime,
-        })
-      })
-
+      // 主炮子弹命中检测
       for (let bi = bulletSprites.length - 1; bi >= 0; bi -= 1) {
         const bullet = bulletSprites[bi]
         const bulletBounds = bullet.getBounds()
@@ -686,6 +709,7 @@ export class GameController {
         },
       )
 
+      // 武器卡拾取判定：解锁导弹武器并提示
       if (weaponCard && hero) {
         weaponCard.rotation += deltaSeconds * 1.8
         const dx = hero.x - weaponCard.x
@@ -723,6 +747,7 @@ export class GameController {
         return
       }
 
+      // 主角与敌机像素级碰撞
       for (const enemy of enemySprites) {
         if (pixelPerfectCollides(hero, enemy, alphaMasks)) {
           startHeroBlink()
@@ -731,6 +756,7 @@ export class GameController {
       }
     })
 
+    // 统一清理流程：事件解绑、对象销毁、WebGL 资源释放
     this.cleanupFn = () => {
       disposed = true
       this.destroyed = true
@@ -772,6 +798,7 @@ export class GameController {
 
   destroy() {
     if (!this.started) return
+    // 由 React 卸载/HMR 调用
     this.cleanupFn?.()
     this.cleanupFn = null
     this.started = false

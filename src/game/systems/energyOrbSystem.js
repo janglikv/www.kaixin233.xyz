@@ -1,12 +1,15 @@
 import * as PIXI from 'pixi.js'
 
+// 能量豆系统：负责掉落物生成、吸附与拾取回调
 export const createEnergyOrbSystem = (app) => {
   const container = new PIXI.Container()
   container.zIndex = 3000
   app.stage.addChild(container)
 
+  // 当前所有存活能量豆
   const orbs = []
 
+  // 预制能量豆纹理，减少运行期开销
   const shape = new PIXI.Graphics()
   shape
     .ellipse(10, 7, 8, 6)
@@ -16,6 +19,7 @@ export const createEnergyOrbSystem = (app) => {
   const texture = app.renderer.generateTexture(shape)
   shape.destroy()
 
+  // 在屏幕绝对坐标生成能量豆（不随世界滚动偏移）
   const spawn = (screenX, screenY) => {
     const sprite = new PIXI.Sprite(texture)
     sprite.anchor.set(0.5)
@@ -32,6 +36,7 @@ export const createEnergyOrbSystem = (app) => {
     })
   }
 
+  // 每帧更新：先漂浮待机，玩家靠近后触发吸附并加速飞向玩家
   const update = (deltaSeconds, heroGlobalPos, onCollected) => {
     const attractRadius = 160
     const pickupRadius = 18
@@ -46,6 +51,7 @@ export const createEnergyOrbSystem = (app) => {
       const dy = heroGlobalPos.y - sprite.y
       const dist = Math.hypot(dx, dy)
 
+      // 待机态：轻微上下浮动 + 小角度摆动
       if (!orb.attracted) {
         orb.bobPhase += deltaSeconds * 5
         sprite.y = orb.baseY + Math.sin(orb.bobPhase) * 2.6
@@ -57,6 +63,7 @@ export const createEnergyOrbSystem = (app) => {
         }
       }
 
+      // 吸附态：持续加速并朝英雄方向追踪
       if (orb.attracted) {
         if (dist <= pickupRadius) {
           container.removeChild(sprite)

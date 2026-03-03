@@ -1,16 +1,20 @@
 import * as PIXI from 'pixi.js'
 
+// 复用点对象，避免每次像素检测都创建临时对象
 const sharedPoint = new PIXI.Point()
 
+// 判断某个世界坐标在 sprite 对应掩码位置是否为“不透明像素”
 export const isOpaqueAtWorldPoint = (sprite, mask, worldX, worldY) => {
   if (!mask) return false
   const local = sprite.toLocal(sharedPoint.set(worldX, worldY))
   const x = Math.floor(local.x + sprite.anchor.x * mask.width)
   const y = Math.floor(local.y + sprite.anchor.y * mask.height)
   if (x < 0 || x >= mask.width || y < 0 || y >= mask.height) return false
+  // alpha 阈值 20：过滤抗锯齿边缘的极淡像素，减少“擦边误判”
   return mask.alpha[y * mask.width + x] > 20
 }
 
+// 像素级精确碰撞：先算包围盒交集，再对交集内逐像素检测
 export const pixelPerfectCollides = (spriteA, spriteB, alphaMasks) => {
   const maskA = alphaMasks.get(spriteA)
   const maskB = alphaMasks.get(spriteB)
@@ -29,6 +33,7 @@ export const pixelPerfectCollides = (spriteA, spriteB, alphaMasks) => {
   const endX = Math.ceil(right)
   const endY = Math.ceil(bottom)
 
+  // 只要找到一个双方都不透明的像素，就判定碰撞成立
   for (let y = startY; y < endY; y += 1) {
     for (let x = startX; x < endX; x += 1) {
       const worldX = x + 0.5
@@ -45,6 +50,7 @@ export const pixelPerfectCollides = (spriteA, spriteB, alphaMasks) => {
   return false
 }
 
+// AABB 粗略重叠检测（性能高，适合先做初筛）
 export const boundsOverlap = (a, b) => (
   a.x < b.x + b.width
   && a.x + a.width > b.x

@@ -1,3 +1,4 @@
+// 第二波配置：500m 触发，敌机 #10，双队列斜向下行
 export const WAVE2 = {
   triggerMeter: 500,
   enemyId: 10,
@@ -13,34 +14,12 @@ export const WAVE2 = {
     swayAmplitude: 16,
     swaySpeed: 3.4,
   },
-  patternIntervalSeconds: 5,
 }
 
-const runtime = {
-  alive: new Set(),
-  parked: new Set(),
-  pendingDeploy: false,
-  deployAt: 0,
-}
-
-export const resetWave2Runtime = () => {
-  runtime.alive.clear()
-  runtime.parked.clear()
-  runtime.pendingDeploy = false
-  runtime.deployAt = 0
-}
-
+// 波次敌机识别：用于主循环在越界时做统一处理
 export const isWave2Enemy = (enemy) => enemy?.__motion?.waveId === 'wave2'
 
-export const onWave2EnemyDestroyed = (enemy) => {
-  runtime.alive.delete(enemy)
-  runtime.parked.delete(enemy)
-  if (runtime.alive.size === 0) {
-    runtime.pendingDeploy = false
-    runtime.deployAt = 0
-  }
-}
-
+// 把一组敌机摆成斜向队列，并注入 diagonal 运动参数
 const placeQueueGroup = ({ enemies, startX, vx }) => {
   const dir = vx > 0 ? 1 : -1
   enemies.forEach((enemy, index) => {
@@ -55,7 +34,6 @@ const placeQueueGroup = ({ enemies, startX, vx }) => {
       vx,
       vy: WAVE2.speedY,
       waveId: 'wave2',
-      parked: false,
       queueOriginX: enemy.x,
       swayAmplitude: WAVE2.formation.swayAmplitude,
       swaySpeed: WAVE2.formation.swaySpeed,
@@ -64,11 +42,13 @@ const placeQueueGroup = ({ enemies, startX, vx }) => {
   })
 }
 
+// 把全部敌机拆成左右两路编队：
+// 左队从右向左、右队从左向右
 const placeDualQueues = ({ enemies, stageWidth }) => {
   const leftCount = Math.ceil(enemies.length / 2)
   const rightCount = enemies.length - leftCount
-  const leftGroup = enemies.slice(0, leftCount) // 右->左
-  const rightGroup = enemies.slice(leftCount, leftCount + rightCount) // 左->右
+  const leftGroup = enemies.slice(0, leftCount)
+  const rightGroup = enemies.slice(leftCount, leftCount + rightCount)
 
   placeQueueGroup({
     enemies: leftGroup,
@@ -82,29 +62,9 @@ const placeDualQueues = ({ enemies, stageWidth }) => {
   })
 }
 
-const scheduleNextPatternIfReady = (nowSeconds) => {
-  if (runtime.alive.size === 0) return
-  if (runtime.parked.size !== runtime.alive.size) return
-  if (runtime.pendingDeploy) return
-
-  runtime.pendingDeploy = true
-  runtime.deployAt = nowSeconds + WAVE2.patternIntervalSeconds
-}
-
-const deployNextPattern = (stageWidth) => {
-  if (runtime.alive.size === 0) return
-  if (runtime.parked.size !== runtime.alive.size) return
-
-  const survivors = Array.from(runtime.alive)
-  placeDualQueues({
-    enemies: survivors,
-    stageWidth,
-  })
-  runtime.parked.clear()
-}
-
+// 生成第二波：先创建全部敌机，再套双队列布局
 export const spawnWave2 = ({ spawnEnemyById, stageWidth }) => {
-  resetWave2Runtime()
+  const enemies = []
 
   for (let i = 0; i < WAVE2.groupSize * 2; i += 1) {
     const enemy = spawnEnemyById(WAVE2.enemyId, {
@@ -118,41 +78,12 @@ export const spawnWave2 = ({ spawnEnemyById, stageWidth }) => {
     })
 
     if (enemy) {
-      runtime.alive.add(enemy)
+      enemies.push(enemy)
     }
   }
 
   placeDualQueues({
-    enemies: Array.from(runtime.alive),
+    enemies,
     stageWidth,
   })
-}
-
-export const recycleWave2Enemy = ({ enemy, stageWidth, stageHeight, nowSeconds }) => {
-  if (!isWave2Enemy(enemy)) return false
-
-  const margin = WAVE2.offscreenMargin + enemy.width
-  const offLeft = enemy.x < -margin
-  const offRight = enemy.x > stageWidth + margin
-  const offBottom = enemy.y > stageHeight + enemy.height + WAVE2.offscreenMargin
-
-  if (!offLeft && !offRight && !offBottom) {
-    return false
-  }
-
-  enemy.visible = false
-  if (enemy.__motion) {
-    enemy.__motion.parked = true
-  }
-
-  runtime.parked.add(enemy)
-  scheduleNextPatternIfReady(nowSeconds)
-  return true
-}
-
-export const updateWave2Pattern = ({ stageWidth, nowSeconds }) => {
-  if (!runtime.pendingDeploy) return
-  if (nowSeconds < runtime.deployAt) return
-  runtime.pendingDeploy = false
-  deployNextPattern(stageWidth)
 }

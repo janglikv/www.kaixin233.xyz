@@ -1,3 +1,5 @@
+// 敌机雪碧图切片坐标（按 #1 ~ #20 对应）
+// 每个对象表示：在 enemy.png 里的 x/y/w/h 区域
 export const ENEMY_FRAMES = [
   { x: 874, y: 54, w: 249, h: 170 },
   { x: 1218, y: 56, w: 226, h: 174 },
@@ -20,11 +22,3 @@ export const ENEMY_FRAMES = [
   { x: 1232, y: 733, w: 266, h: 201 },
   { x: 929, y: 741, w: 251, h: 192 },
 ]
-
-export const ROUTE_PLAN = []
-
-export const FORMATION_EVENT = {
-  meter: 100,
-  enemyId: 15,
-  count: 20,
-}

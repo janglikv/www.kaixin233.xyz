@@ -1,15 +1,19 @@
 import * as PIXI from 'pixi.js'
 
+// 星空背景系统：负责生成星点、布局与匀速滚动
 export const createStarfieldSystem = (app, worldLayer) => {
+  // 统一维护所有星点粒子
   const particles = []
 
   const container = new PIXI.Container()
   container.zIndex = -100
   worldLayer.addChild(container)
 
+  // 渐变底板（用于压暗背景，让星点更清晰）
   const glow = new PIXI.Graphics()
   container.addChild(glow)
 
+  // 生成星点纹理，避免每个星点都用 Graphics 实时绘制
   const createStarTexture = (radius, color, alpha) => {
     const shape = new PIXI.Graphics()
     shape.circle(radius, radius, radius).fill({ color, alpha })
@@ -18,10 +22,12 @@ export const createStarfieldSystem = (app, worldLayer) => {
     return texture
   }
 
+  // 三层星点纹理（远/中/近）
   const farStarTexture = createStarTexture(1, 0x9fb2c7, 0.7)
   const midStarTexture = createStarTexture(1.4, 0xc9def7, 0.82)
   const nearStarTexture = createStarTexture(2, 0xf2f7ff, 0.95)
 
+  // 添加某一层星点
   const addLayer = (count, texture, speed, twinkle = false) => {
     for (let i = 0; i < count; i += 1) {
       const sprite = new PIXI.Sprite(texture)
@@ -41,11 +47,13 @@ export const createStarfieldSystem = (app, worldLayer) => {
     }
   }
 
+  // 用户要求：大小星星速度保持一致
   const uniformSpeed = 48
   addLayer(90, farStarTexture, uniformSpeed, false)
   addLayer(56, midStarTexture, uniformSpeed, true)
   addLayer(28, nearStarTexture, uniformSpeed, true)
 
+  // 分辨率变化时重绘背景并修正越界星点
   const layout = () => {
     const width = app.renderer.width
     const height = app.renderer.height
@@ -59,6 +67,7 @@ export const createStarfieldSystem = (app, worldLayer) => {
     }
   }
 
+  // 每帧更新：纵向卷轴滚动 + 闪烁
   const update = (deltaSeconds) => {
     const width = app.renderer.width
     const height = app.renderer.height

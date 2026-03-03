@@ -1,10 +1,11 @@
-/* 基础样式 */
+/* 全局重置：统一盒模型，清除默认边距 */
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+/* 基础字体与抗锯齿 */
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
@@ -14,12 +15,15 @@ body {
   background: #000;
   color: #ccc;
 }
+
+/* 补充伪元素盒模型一致性 */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
+/* 让应用根节点全屏铺满 */
 html,
 body,
 #root {
@@ -27,12 +31,14 @@ body,
   margin: 0;
 }
 
+/* 项目主题底色与中文字体栈 */
 body {
   background: #0a0d12;
   color: #e8edf2;
   font-family: 'IBM Plex Sans', 'Noto Sans SC', sans-serif;
 }
 
+/* React 根容器：用于承载按钮与 Pixi 画布 */
 .app-root {
   height: 100%;
   width: 100%;
@@ -40,14 +46,16 @@ body {
   position: relative;
 }
 
+/* Pixi 画布容器 */
 .game-root {
   height: 100%;
   width: 100%;
 }
 
+/* 资料库切换按钮：固定在左下角 */
 .library-btn {
   position: absolute;
-  top: 14px;
+  bottom: 14px;
   left: 14px;
   z-index: 20;
   border: 1px solid #7fb8ff;
@@ -60,6 +68,7 @@ body {
   cursor: pointer;
 }
 
+/* 悬停反馈 */
 .library-btn:hover {
   background: rgba(17, 39, 62, 0.95);
 }
