@@ -11,9 +11,6 @@ export const createExplosionSystem = (app, worldLayer) => {
   const distortionRipples = []
   const activeDistortionFilters = []
 
-  let shakeTime = 0
-  let shakeStrength = 0
-
   const fxContainer = new PIXI.Container()
   fxContainer.zIndex = 40
   worldLayer.addChild(fxContainer)
@@ -109,7 +106,7 @@ export const createExplosionSystem = (app, worldLayer) => {
 
     const filter = new PIXI.DisplacementFilter({
       sprite: mapSprite,
-      scale: { x: 96, y: 96 },
+      scale: { x: 108, y: 108 },
     })
     activeDistortionFilters.push(filter)
     refreshWorldFilters()
@@ -120,17 +117,13 @@ export const createExplosionSystem = (app, worldLayer) => {
       age: 0,
       life: 0.58,
       startScale: 0.2,
-      endScale: 2.3,
-      startStrength: 96,
+      endScale: 2.0,
+      startStrength: 108,
     })
   }
 
   // 触发爆炸：组合多种视觉层
   const spawn = (x, y) => {
-    // 震屏参数
-    shakeTime = Math.max(shakeTime, 0.16)
-    shakeStrength = Math.max(shakeStrength, 7)
-
     // 爆闪
     const flash = new PIXI.Sprite(flashTexture)
     flash.anchor.set(0.5)
@@ -317,19 +310,13 @@ export const createExplosionSystem = (app, worldLayer) => {
       const scale = ripple.startScale + (ripple.endScale - ripple.startScale) * easeOut
       ripple.sprite.scale.set(scale)
       ripple.sprite.rotation += deltaSeconds * 2.5
-      const strength = ripple.startStrength * (1 - t) * (0.78 + 0.22 * Math.sin(ripple.age * 26))
+      const strength = ripple.startStrength * ((1 - t) ** 0.72) * (0.72 + 0.28 * Math.sin(ripple.age * 30))
       ripple.filter.scale.x = strength
       ripple.filter.scale.y = strength
     }
 
-    // 轻微随机位移实现震屏
-    if (shakeTime > 0) {
-      shakeTime = Math.max(0, shakeTime - deltaSeconds)
-      const k = shakeTime / 0.16
-      const power = shakeStrength * k
-      worldLayer.x = (Math.random() * 2 - 1) * power
-      worldLayer.y = (Math.random() * 2 - 1) * power
-    } else if (worldLayer.x !== 0 || worldLayer.y !== 0) {
+    // 不使用震屏时，确保世界层偏移被重置
+    if (worldLayer.x !== 0 || worldLayer.y !== 0) {
       worldLayer.x = 0
       worldLayer.y = 0
     }

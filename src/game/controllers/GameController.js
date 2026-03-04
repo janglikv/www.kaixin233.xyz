@@ -83,6 +83,7 @@ export class GameController {
     let spawnHeroBullet = null // 主炮发射函数
     let spawnHomingMissiles = null // 导弹发射函数（含末端制导参数）
     let spawnEnemyById = null // 通用敌机生成函数（按 #ID + 运动参数）
+    let spawnWaveByIds = null // 手动重刷波次函数（按波次 ID 列表）
 
     // ===== 战斗状态 =====
     let elapsedGameTime = 0 // 累计游戏时间（秒）
@@ -157,6 +158,15 @@ export class GameController {
       if (['w', 'a', 's', 'd'].includes(key)) {
         pressedKeys.add(key)
       }
+      if (!event.repeat) {
+        if (event.code === 'Digit1') {
+          spawnWaveByIds?.(['wave1'])
+        } else if (event.code === 'Digit2') {
+          spawnWaveByIds?.(['wave2-left', 'wave2-right'])
+        } else if (event.code === 'Digit3') {
+          spawnWaveByIds?.(['wave3'])
+        }
+      }
       if (event.code === 'Slash' && !event.repeat) {
         const nextWave = getNextUntriggeredWave(triggeredWaveIds) // 下一波未触发波次
         if (nextWave) {
@@ -228,6 +238,17 @@ export class GameController {
       hero.y = Math.max(halfHeight, Math.min(app.renderer.height - halfHeight, hero.y))
     }
 
+    // 敌机是否处于当前可视区域（用于命中判定过滤）
+    const isEnemyInsideScreen = (enemy, stageWidth, stageHeight) => {
+      const bounds = enemy.getBounds()
+      return !(
+        bounds.right < 0
+        || bounds.left > stageWidth
+        || bounds.bottom < 0
+        || bounds.top > stageHeight
+      )
+    }
+
     // 导弹销毁工具：统一删除容器与数组，避免泄漏
     const removeMissile = (missileData, index) => {
       missileContainer.removeChild(missileData.sprite)
@@ -261,7 +282,7 @@ export class GameController {
     // 创建子系统
     starfieldSystem = createStarfieldSystem(app, worldLayer)
     explosionSystem = createExplosionSystem(app, worldLayer)
-    energyOrbSystem = createEnergyOrbSystem(app)
+    energyOrbSystem = createEnergyOrbSystem(app, worldLayer)
 
     const heroTexture = await PIXI.Assets.load(heroPng)
     hero = new PIXI.Sprite(heroTexture)
@@ -468,6 +489,30 @@ export class GameController {
     }
     updateRouteHud()
 
+    // 手动重刷指定波次（用于开发调试）
+    spawnWaveByIds = (waveIds) => {
+      if (!spawnEnemyById) return
+      const stageWidth = app.renderer.width
+      const stageHeight = app.renderer.height
+      const spawnedInfos = []
+
+      for (const waveId of waveIds) {
+        const wave = WAVE_REGISTRY.find((item) => item.id === waveId)
+        if (!wave) continue
+        wave.spawn({
+          spawnEnemyById,
+          stageWidth,
+          stageHeight,
+        })
+        spawnedInfos.push(wave.getSpawnInfo())
+      }
+
+      if (spawnedInfos.length > 0) {
+        lastSpawnInfo = `手动:${spawnedInfos.join(' + ')}`
+        updateRouteHud()
+      }
+    }
+
     // 创建资料库系统，并同步 React 当前状态
     this.librarySystem = createLibrarySystem(app, enemyTextures, this.showLibrary)
     this.librarySystem.setVisible(this.showLibrary)
@@ -650,6 +695,7 @@ export class GameController {
         const missileBounds = missile.sprite.getBounds()
         let hitEnemyIndex = -1 // 导弹命中的敌机索引（-1 表示未命中）
         for (let ei = enemySprites.length - 1; ei >= 0; ei -= 1) {
+          if (!isEnemyInsideScreen(enemySprites[ei], stageW, stageH)) continue
           if (boundsOverlap(missileBounds, enemySprites[ei].getBounds())) {
             hitEnemyIndex = ei
             break
@@ -706,6 +752,7 @@ export class GameController {
 
         for (let ei = enemySprites.length - 1; ei >= 0; ei -= 1) {
           const enemy = enemySprites[ei]
+          if (!isEnemyInsideScreen(enemy, stageW, stageH)) continue
           if (!boundsOverlap(bulletBounds, enemy.getBounds())) continue
           removeEnemy(enemy, ei)
           hit = true
@@ -818,6 +865,7 @@ export class GameController {
   destroy() {
     if (!this.started) return
     // 由 React 卸载/HMR 调用
+    this.destroyed = true
     this.cleanupFn?.()
     this.cleanupFn = null
     this.started = false

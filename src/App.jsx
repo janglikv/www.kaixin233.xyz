@@ -1,14 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { GameController } from './game/controllers/GameController'
 
-// HMR 版本号：用于在热更新时强制重建 Pixi 控制器，避免状态脏读
-const hmrVersion = (() => {
-  if (!import.meta.hot) return 0
-  const nextVersion = (import.meta.hot.data.pixiAppVersion ?? 0) + 1
-  import.meta.hot.data.pixiAppVersion = nextVersion
-  return nextVersion
-})()
-
 export default function App() {
   // Pixi 画布挂载容器
   const containerRef = useRef(null)
@@ -16,6 +8,21 @@ export default function App() {
   const controllerRef = useRef(null)
   // 资料库 UI 状态（React 侧）
   const [showLibrary, setShowLibrary] = useState(false)
+  // 强制重建计数：用于开发态下在任意模块热更新后重启 Pixi 游戏
+  const [rebuildVersion, setRebuildVersion] = useState(0)
+
+  useEffect(() => { 
+    if (!import.meta.hot) return undefined
+
+    const handleBeforeUpdate = () => {
+      setRebuildVersion((version) => version + 1)
+    }
+
+    import.meta.hot.on('vite:beforeUpdate', handleBeforeUpdate)
+    return () => {
+      import.meta.hot.off('vite:beforeUpdate', handleBeforeUpdate)
+    }
+  }, [])
 
   useEffect(() => {
     if (!containerRef.current) return undefined
@@ -36,7 +43,7 @@ export default function App() {
       controllerRef.current = null
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hmrVersion])
+  }, [rebuildVersion])
 
   // React 状态变化时，同步给 Pixi 内部资料库面板
   useEffect(() => {
