@@ -99,6 +99,9 @@ export const createLibrarySystem = (app, enemyTextures, visible) => {
   // 外部开关
   const setVisible = (nextVisible) => {
     container.visible = nextVisible
+    if (!nextVisible) return
+    layout()
+    app.stage.sortChildren()
   }
 
   return { layout, setVisible, container }

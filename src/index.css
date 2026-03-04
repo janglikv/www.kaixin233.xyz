@@ -57,7 +57,8 @@ body {
   position: absolute;
   bottom: 14px;
   left: 14px;
-  z-index: 20;
+  z-index: 99999;
+  pointer-events: auto;
   border: 1px solid #7fb8ff;
   border-radius: 10px;
   padding: 8px 14px;

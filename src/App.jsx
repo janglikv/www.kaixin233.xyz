@@ -48,7 +48,13 @@ export default function App() {
       <button
         type="button"
         className="library-btn"
-        onClick={() => setShowLibrary((value) => !value)}
+        onClick={() => {
+          setShowLibrary((value) => {
+            const next = !value
+            controllerRef.current?.setLibraryVisible(next)
+            return next
+          })
+        }}
       >
         {showLibrary ? '关闭资料库' : '资料库'}
       </button>

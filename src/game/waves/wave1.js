@@ -13,7 +13,6 @@ export const WAVE1 = {
     spacingY: 16, // 纵向间隔（值越大，队伍越“长”）
     scale: 0.165, // 敌机缩放
     motion: {
-      type: 'snake', // 运动类型：蛇形
       amplitude: 28, // 蛇形左右摆动振幅（像素）
       angularSpeed: 1.1, // 相位变化速度（越大摆动越快）
       phase: 0, // 初始相位
@@ -35,7 +34,7 @@ export const spawnWave1 = ({ spawnEnemyById, stageWidth }) => {
       x: centerX, // 全部从中线出生
       y: WAVE1.initialRoute.spawnY - i * WAVE1.initialRoute.spacingY, // 按索引向上排布形成纵队
       scale: WAVE1.initialRoute.scale, // 第一波缩放比
-      motionType: WAVE1.initialRoute.motion.type, // snake
+      motionType: 'snake',
       laneX: centerX, // 蛇形中心线
       amplitude: WAVE1.initialRoute.motion.amplitude, // 蛇形振幅
       angularSpeed: WAVE1.initialRoute.motion.angularSpeed, // 蛇形角速度

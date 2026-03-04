@@ -11,6 +11,7 @@ import { createEnergyOrbSystem } from '../systems/energyOrbSystem'
 import { WAVE_REGISTRY, getNextUntriggeredWave, isRegisteredWaveEnemy } from '../waves/registry'
 import { updateWave1EnemyMotion } from '../waves/wave1'
 import { updateWave2EnemyMotion } from '../waves/wave2'
+import { updateWave3EnemyMotion } from '../waves/wave3'
 import {
   FIRE_INTERVAL_BY_LEVEL,
   MISSILE_UNLOCK_RULE,
@@ -399,6 +400,11 @@ export class GameController {
           type: 'diagonal',
           vx: options.vx ?? 0,
           vy: options.vy ?? enemyMoveSpeed,
+          baseX: options.baseX ?? enemy.x,
+          centerX: options.centerX ?? app.renderer.width * 0.5,
+          outwardVx: options.outwardVx ?? 0,
+          turnY: options.turnY ?? Number.POSITIVE_INFINITY,
+          turned: options.turned ?? false,
           waveId: options.waveId ?? null,
           queueOriginX: options.queueOriginX ?? enemy.x,
           swayAmplitude: options.swayAmplitude ?? 0,
@@ -464,6 +470,7 @@ export class GameController {
 
     // 创建资料库系统，并同步 React 当前状态
     this.librarySystem = createLibrarySystem(app, enemyTextures, this.showLibrary)
+    this.librarySystem.setVisible(this.showLibrary)
 
     // 分辨率变化时统一重排
     const layout = () => {
@@ -568,6 +575,7 @@ export class GameController {
         wave.spawn({
           spawnEnemyById,
           stageWidth: stageW,
+          stageHeight: stageH,
         })
         lastSpawnInfo = wave.getSpawnInfo()
       }
@@ -662,6 +670,8 @@ export class GameController {
           // 第一波专属轨迹在 wave1 文件内维护
         } else if (updateWave2EnemyMotion({ enemy, deltaSeconds })) {
           // 第二波专属轨迹在 wave2 文件内维护
+        } else if (updateWave3EnemyMotion({ enemy, deltaSeconds, moveSpeed: enemyMoveSpeed })) {
+          // 第三波专属轨迹在 wave3 文件内维护
         } else {
           enemy.y += enemyMoveSpeed * deltaSeconds
         }
