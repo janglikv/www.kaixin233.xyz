@@ -15,7 +15,6 @@ import { updateWave3EnemyMotion } from '../waves/wave3'
 import {
   FIRE_INTERVAL_BY_LEVEL,
   MISSILE_UNLOCK_RULE,
-  WEAPON_DISPLAY_NAME,
   WEAPON_IDS,
   WEAPON_UPGRADE_COST,
   getTracksByLevel,
@@ -99,7 +98,6 @@ export class GameController {
 
     // ===== 里程与刷怪状态 =====
     let traveledMeters = 0 // 当前累计里程（米）
-    let lastSpawnInfo = '无' // HUD 上显示的最近刷怪信息
     const triggeredWaveIds = new Set() // 已触发波次 ID 集合
 
     // ===== 子系统实例 =====
@@ -446,18 +444,6 @@ export class GameController {
       return enemy
     }
 
-    const routeHudText = new PIXI.Text({
-      text: '',
-      style: {
-        fill: 0xeaf4ff,
-        fontSize: 14,
-        fontFamily: 'monospace',
-        stroke: { color: 0x000000, width: 3 },
-      },
-    })
-    routeHudText.zIndex = 2000
-    app.stage.addChild(routeHudText)
-
     hudNoticeText = new PIXI.Text({
       text: '',
       style: {
@@ -472,30 +458,11 @@ export class GameController {
     hudNoticeText.visible = false
     app.stage.addChild(hudNoticeText)
 
-    // HUD 更新：行进信息、里程、武器等级、解锁进度
-    const updateRouteHud = () => {
-      const nextWave = getNextUntriggeredWave(triggeredWaveIds) // HUD 下一个里程目标
-      const nextText = nextWave ? nextWave.getNextText() : '已完成'
-      const nextUpgrade = weaponLevel < 3 ? `Lv${weaponLevel + 1}:${WEAPON_UPGRADE_COST[weaponLevel + 1]}` : 'MAX'
-      const weaponName = WEAPON_DISPLAY_NAME[currentWeapon]
-      const unlockText = missileWeaponUnlocked
-        ? '导弹已解锁(Q切换)'
-        : `导弹解锁:#${MISSILE_UNLOCK_RULE.enemyId} ${unlockKillCount}/${MISSILE_UNLOCK_RULE.killCount}`
-      routeHudText.text = `行进管理 速度:${travelSpeedMps.toFixed(0)}m/s | 里程:${traveledMeters.toFixed(1)}m | 下个:${nextText} | 最近:${lastSpawnInfo} | 能量:${energyCount} | 武器:${weaponName} Lv${weaponLevel} | 升级(V):${nextUpgrade} | ${unlockText}`
-      routeHudText.position.set(170, Math.max(14, app.renderer.height - 34))
-      if (hudNoticeText) {
-        hudNoticeText.position.set(app.renderer.width / 2, Math.max(14, app.renderer.height - 86))
-      }
-    }
-    updateRouteHud()
-
     // 手动重刷指定波次（用于开发调试）
     spawnWaveByIds = (waveIds) => {
       if (!spawnEnemyById) return
       const stageWidth = app.renderer.width
       const stageHeight = app.renderer.height
-      const spawnedInfos = []
-
       for (const waveId of waveIds) {
         const wave = WAVE_REGISTRY.find((item) => item.id === waveId)
         if (!wave) continue
@@ -504,12 +471,6 @@ export class GameController {
           stageWidth,
           stageHeight,
         })
-        spawnedInfos.push(wave.getSpawnInfo())
-      }
-
-      if (spawnedInfos.length > 0) {
-        lastSpawnInfo = `手动:${spawnedInfos.join(' + ')}`
-        updateRouteHud()
       }
     }
 
@@ -523,7 +484,9 @@ export class GameController {
       starfieldSystem.layout()
       explosionSystem.layout()
       this.librarySystem.layout()
-      updateRouteHud()
+      if (hudNoticeText) {
+        hudNoticeText.position.set(app.renderer.width / 2, Math.max(14, app.renderer.height - 86))
+      }
     }
 
     resizeHandler = layout
@@ -622,10 +585,7 @@ export class GameController {
           stageWidth: stageW,
           stageHeight: stageH,
         })
-        lastSpawnInfo = wave.getSpawnInfo()
       }
-
-      updateRouteHud()
       starfieldSystem.update(deltaSeconds)
 
       for (let i = bulletSprites.length - 1; i >= 0; i -= 1) {
