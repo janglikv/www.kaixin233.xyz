@@ -9,9 +9,6 @@ import { createExplosionSystem } from '../systems/explosionSystem'
 import { createLibrarySystem } from '../systems/librarySystem'
 import { createEnergyOrbSystem } from '../systems/energyOrbSystem'
 import { WAVE_REGISTRY, getNextUntriggeredWave, isRegisteredWaveEnemy } from '../waves/registry'
-import { updateWave1EnemyMotion } from '../waves/wave1'
-import { updateWave2EnemyMotion } from '../waves/wave2'
-import { updateWave3EnemyMotion } from '../waves/wave3'
 import {
   FIRE_INTERVAL_BY_LEVEL,
   MISSILE_UNLOCK_RULE,
@@ -85,7 +82,7 @@ export class GameController {
     let spawnHeroBullet = null // 主炮发射函数
     let spawnHomingMissiles = null // 导弹发射函数（含末端制导参数）
     let spawnEnemyById = null // 通用敌机生成函数（按 #ID + 运动参数）
-    let spawnWaveByIds = null // 手动重刷波次函数（按波次 ID 列表）
+    let spawnWaveByIndex = null // 手动重刷波次函数（按注册顺序索引）
 
     // ===== 战斗状态 =====
     let elapsedGameTime = 0 // 累计游戏时间（秒）
@@ -101,7 +98,7 @@ export class GameController {
 
     // ===== 里程与刷怪状态 =====
     let traveledMeters = 0 // 当前累计里程（米）
-    const triggeredWaveIds = new Set() // 已触发波次 ID 集合
+    const triggeredWaves = new Set() // 已触发波次集合
 
     // ===== 子系统实例 =====
     let starfieldSystem = null
@@ -172,15 +169,15 @@ export class GameController {
       }
       if (!event.repeat) {
         if (event.code === 'Digit1') {
-          spawnWaveByIds?.(['wave1'])
+          spawnWaveByIndex?.(0)
         } else if (event.code === 'Digit2') {
-          spawnWaveByIds?.(['wave2-left', 'wave2-right'])
+          spawnWaveByIndex?.(1)
         } else if (event.code === 'Digit3') {
-          spawnWaveByIds?.(['wave3'])
+          spawnWaveByIndex?.(2)
         }
       }
       if (event.code === 'Slash' && !event.repeat) {
-        const nextWave = getNextUntriggeredWave(triggeredWaveIds) // 下一波未触发波次
+        const nextWave = getNextUntriggeredWave(triggeredWaves) // 下一波未触发波次
         if (nextWave) {
           traveledMeters = Math.max(traveledMeters, nextWave.config.triggerMeter)
         }
@@ -256,6 +253,13 @@ export class GameController {
       missileContainer.removeChild(missileData.sprite)
       missileData.sprite.destroy()
       missileSprites.splice(index, 1)
+    }
+
+    const updateEnemyMotion = (enemy, deltaSeconds) => {
+      const motion = enemy.__motion
+      if (!motion?.managed || typeof motion.update !== 'function') return false
+      motion.update({ enemy, motion, deltaSeconds })
+      return true
     }
 
     // Pixi v8 初始化：必须先 init 再访问 renderer/canvas
@@ -424,34 +428,7 @@ export class GameController {
       enemy.x = options.x ?? (90 + Math.random() * Math.max(120, LOGICAL_WIDTH - 180))
       enemy.y = options.y ?? -Math.max(36, enemy.height / 2)
 
-      if (options.motionType === 'snake') {
-        enemy.__motion = {
-          type: 'snake',
-          laneX: options.laneX ?? enemy.x,
-          amplitude: options.amplitude ?? 72,
-          angularSpeed: options.angularSpeed ?? 3.2,
-          phase: options.phase ?? 0,
-          frequency: options.frequency ?? 0.032,
-          segmentOffset: options.segmentOffset ?? 0,
-          waveId: options.waveId ?? null,
-        }
-      } else if (options.motionType === 'diagonal') {
-        enemy.__motion = {
-          type: 'diagonal',
-          vx: options.vx ?? 0,
-          vy: options.vy ?? enemyMoveSpeed,
-          baseX: options.baseX ?? enemy.x,
-          centerX: options.centerX ?? LOGICAL_WIDTH * 0.5,
-          outwardVx: options.outwardVx ?? 0,
-          turnY: options.turnY ?? Number.POSITIVE_INFINITY,
-          turned: options.turned ?? false,
-          waveId: options.waveId ?? null,
-          queueOriginX: options.queueOriginX ?? enemy.x,
-          swayAmplitude: options.swayAmplitude ?? 0,
-          swaySpeed: options.swaySpeed ?? 0,
-          swayPhase: options.swayPhase ?? 0,
-        }
-      }
+      enemy.__motion = options.motion ? { ...options.motion, managed: true } : null
 
       enemyContainer.addChild(enemy)
       enemySprites.push(enemy)
@@ -480,19 +457,17 @@ export class GameController {
     gameLayer.addChild(hudNoticeText)
 
     // 手动重刷指定波次（用于开发调试）
-    spawnWaveByIds = (waveIds) => {
+    spawnWaveByIndex = (waveIndex) => {
       if (!spawnEnemyById) return
+      const wave = WAVE_REGISTRY[waveIndex]
+      if (!wave) return
       const stageWidth = LOGICAL_WIDTH
       const stageHeight = LOGICAL_HEIGHT
-      for (const waveId of waveIds) {
-        const wave = WAVE_REGISTRY.find((item) => item.id === waveId)
-        if (!wave) continue
-        wave.spawn({
-          spawnEnemyById,
-          stageWidth,
-          stageHeight,
-        })
-      }
+      wave.spawn({
+        spawnEnemyById,
+        stageWidth,
+        stageHeight,
+      })
     }
 
     // 创建资料库系统，并同步 React 当前状态
@@ -605,9 +580,9 @@ export class GameController {
 
       // 里程触发波次：每波只触发一次
       for (const wave of WAVE_REGISTRY) {
-        if (triggeredWaveIds.has(wave.id)) continue
+        if (triggeredWaves.has(wave)) continue
         if (traveledMeters < wave.config.triggerMeter) continue
-        triggeredWaveIds.add(wave.id)
+        triggeredWaves.add(wave)
         wave.spawn({
           spawnEnemyById,
           stageWidth: stageW,
@@ -703,13 +678,7 @@ export class GameController {
         const enemy = enemySprites[i]
         const prevX = enemy.x
         const prevY = enemy.y
-        if (updateWave1EnemyMotion({ enemy, deltaSeconds, moveSpeed: enemyMoveSpeed })) {
-          // 第一波专属轨迹在 wave1 文件内维护
-        } else if (updateWave2EnemyMotion({ enemy, deltaSeconds })) {
-          // 第二波专属轨迹在 wave2 文件内维护
-        } else if (updateWave3EnemyMotion({ enemy, deltaSeconds, moveSpeed: enemyMoveSpeed })) {
-          // 第三波专属轨迹在 wave3 文件内维护
-        } else {
+        if (!updateEnemyMotion(enemy, deltaSeconds)) {
           enemy.y += enemyMoveSpeed * deltaSeconds
         }
 
