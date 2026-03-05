@@ -17,7 +17,6 @@ import {
   MISSILE_UNLOCK_RULE,
   WEAPON_IDS,
   WEAPON_UPGRADE_COST,
-  getTracksByLevel,
 } from '../weapons/registry'
 
 // 游戏主控制器：
@@ -68,7 +67,7 @@ export class GameController {
     // ===== 核心数值配置 =====
     const heroSpeed = 420 // 主角移动速度（像素/秒）
     const enemyMoveSpeed = 120 // 敌机默认下行速度（像素/秒）
-    const bulletSpeed = 640 // 主炮子弹初始速度（像素/秒）
+    const bulletSpeed = 1200 // 主炮子弹初始速度（像素/秒）
     const blinkInterval = 0.1 // 受击闪烁每次切换间隔（秒）
     const blinkTotalToggles = 6 // 闪烁总切换次数（6 次约等于闪 3 下）
     const travelSpeedMps = 48 // 行进系统里程推进速度（米/秒）
@@ -152,7 +151,20 @@ export class GameController {
       }
     }
 
-    // 键盘按下处理：移动、开火、切枪、升级、跳波次
+    // 尝试自动升级：能量足够时立即升级，支持一次连升多级
+    const tryAutoUpgradeWeapon = () => {
+      while (weaponLevel < 3) {
+        const targetLevel = weaponLevel + 1
+        const cost = WEAPON_UPGRADE_COST[targetLevel]
+        if (energyCount < cost) break
+        energyCount -= cost
+        weaponLevel = targetLevel
+        nextFireTime = Math.min(nextFireTime, elapsedGameTime + FIRE_INTERVAL_BY_LEVEL[weaponLevel])
+        nextMissileFireTime = Math.min(nextMissileFireTime, elapsedGameTime + FIRE_INTERVAL_BY_LEVEL[weaponLevel])
+      }
+    }
+
+    // 键盘按下处理：移动、开火、切枪、跳波次
     const handleKeyDown = (event) => {
       const key = event.key.toLowerCase() // 统一小写处理，便于比较
       if (['w', 'a', 's', 'd'].includes(key)) {
@@ -182,16 +194,6 @@ export class GameController {
         hudNoticeUntil = elapsedGameTime + 1.5
         if (hudNoticeText) {
           hudNoticeText.text = currentWeapon === WEAPON_IDS.GUN ? '已切换：主炮' : '已切换：追踪导弹'
-        }
-      }
-      if (key === 'v' && !event.repeat && weaponLevel < 3) {
-        const targetLevel = weaponLevel + 1
-        const cost = WEAPON_UPGRADE_COST[targetLevel]
-        if (energyCount >= cost) {
-          energyCount -= cost
-          weaponLevel = targetLevel
-          nextFireTime = Math.min(nextFireTime, elapsedGameTime + FIRE_INTERVAL_BY_LEVEL[weaponLevel])
-          nextMissileFireTime = Math.min(nextMissileFireTime, elapsedGameTime + FIRE_INTERVAL_BY_LEVEL[weaponLevel])
         }
       }
     }
@@ -353,44 +355,49 @@ export class GameController {
     const weaponCardTexture = app.renderer.generateTexture(weaponCardShape)
     weaponCardShape.destroy()
 
-    // 主炮发射：按等级生成多轨道子弹
+    // 主炮发射：固定单发，升级仅提升攻速
     spawnHeroBullet = () => {
       if (!hero) return
-      const tracks = getTracksByLevel(weaponLevel) // 当前等级对应弹道偏移列表
-      for (const offsetX of tracks) {
-        const bullet = new PIXI.Sprite(bulletTexture)
-        bullet.anchor.set(0.5)
-        bullet.x = hero.x + offsetX
-        bullet.y = hero.y - hero.height * 0.42
-        bulletContainer.addChild(bullet)
-        bulletSprites.push(bullet)
-      }
+      const forwardX = 0
+      const forwardY = -1
+      const muzzleOffset = hero.height * 0.42
+      const bullet = new PIXI.Sprite(bulletTexture)
+      bullet.anchor.set(0.5)
+      bullet.x = hero.x + forwardX * muzzleOffset
+      bullet.y = hero.y + forwardY * muzzleOffset
+      bullet.rotation = 0
+      bulletContainer.addChild(bullet)
+      bulletSprites.push({
+        sprite: bullet,
+        vx: forwardX * bulletSpeed,
+        vy: forwardY * bulletSpeed,
+      })
     }
 
-    // 导弹发射：先直线飞行，再末端制导
+    // 导弹发射：固定单发，先直线飞行，再末端制导
     spawnHomingMissiles = () => {
       if (!hero) return
-      const tracks = getTracksByLevel(weaponLevel) // 当前等级对应导弹弹道偏移
-      for (const offsetX of tracks) {
-        const missile = new PIXI.Sprite(missileTexture)
-        missile.anchor.set(0.25, 0.5)
-        missile.x = hero.x + offsetX
-        missile.y = hero.y - hero.height * 0.25
-        missile.rotation = -Math.PI / 2
-        missileContainer.addChild(missile)
-        missileSprites.push({
-          sprite: missile,
-          speed: bulletSpeed,
-          maxSpeed: 820,
-          turnRate: 7.2,
-          vx: 0,
-          vy: -bulletSpeed,
-          travelDistance: 0,
-          terminalRange: 210,
-          armingDistance: 220,
-          lockedTarget: null,
-        })
-      }
+      const forwardX = 0
+      const forwardY = -1
+      const muzzleOffset = hero.height * 0.25
+      const missile = new PIXI.Sprite(missileTexture)
+      missile.anchor.set(0.25, 0.5)
+      missile.x = hero.x + forwardX * muzzleOffset
+      missile.y = hero.y + forwardY * muzzleOffset
+      missile.rotation = -Math.PI / 2
+      missileContainer.addChild(missile)
+      missileSprites.push({
+        sprite: missile,
+        speed: bulletSpeed,
+        maxSpeed: 820,
+        turnRate: 7.2,
+        vx: forwardX * bulletSpeed,
+        vy: forwardY * bulletSpeed,
+        travelDistance: 0,
+        terminalRange: 210,
+        armingDistance: 220,
+        lockedTarget: null,
+      })
     }
 
     const enemySheet = await PIXI.Assets.load(enemyPng)
@@ -610,9 +617,12 @@ export class GameController {
       starfieldSystem.update(deltaSeconds)
 
       for (let i = bulletSprites.length - 1; i >= 0; i -= 1) {
-        const bullet = bulletSprites[i]
-        bullet.y -= bulletSpeed * deltaSeconds
-        if (bullet.y < -24) {
+        const bulletData = bulletSprites[i]
+        const bullet = bulletData.sprite
+        bullet.x += bulletData.vx * deltaSeconds
+        bullet.y += bulletData.vy * deltaSeconds
+        const out = bullet.x < -40 || bullet.x > stageW + 40 || bullet.y < -40 || bullet.y > stageH + 40
+        if (out) {
           bulletContainer.removeChild(bullet)
           bullet.destroy()
           bulletSprites.splice(i, 1)
@@ -727,7 +737,8 @@ export class GameController {
 
       // 主炮子弹命中检测
       for (let bi = bulletSprites.length - 1; bi >= 0; bi -= 1) {
-        const bullet = bulletSprites[bi]
+        const bulletData = bulletSprites[bi]
+        const bullet = bulletData.sprite
         const bulletBounds = bullet.getBounds()
         let hit = false // 当前子弹是否已命中敌机
 
@@ -753,6 +764,7 @@ export class GameController {
         hero.position,
         () => {
           energyCount += 1
+          tryAutoUpgradeWeapon()
         },
       )
 

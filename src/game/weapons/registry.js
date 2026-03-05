@@ -29,11 +29,3 @@ export const MISSILE_UNLOCK_RULE = {
   enemyId: 15, // 计数目标敌机 ID
   killCount: 20, // 累计击杀达标阈值
 }
-
-// 根据武器等级返回弹道横向偏移（单位：像素）
-// Lv1 单发；Lv2 三发；Lv3 五发
-export const getTracksByLevel = (level) => {
-  if (level === 1) return [0]
-  if (level === 2) return [-18, 0, 18]
-  return [-30, -15, 0, 15, 30]
-}
