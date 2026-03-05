@@ -52,12 +52,24 @@ body {
   width: 100%;
 }
 
+/* DOM UI 统一按逻辑分辨率等比缩放 */
+.ui-scale-root {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1280px;
+  height: 720px;
+  transform-origin: top left;
+  pointer-events: none;
+  z-index: 99998;
+}
+
 /* 资料库切换按钮：固定在左下角 */
 .library-btn {
   position: absolute;
   bottom: 14px;
   left: 14px;
-  z-index: 99999;
+  z-index: 1;
   pointer-events: auto;
   border: 1px solid #7fb8ff;
   border-radius: 10px;

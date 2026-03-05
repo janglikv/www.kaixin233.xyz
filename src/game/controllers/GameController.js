@@ -46,6 +46,9 @@ export class GameController {
   async start() {
     if (this.started || !this.container) return
 
+    const LOGICAL_WIDTH = 1280
+    const LOGICAL_HEIGHT = 720
+
     this.started = true
     this.destroyed = false
 
@@ -72,6 +75,7 @@ export class GameController {
 
     // ===== 场景节点引用 =====
     let hero = null // 主角精灵
+    let gameLayer = null // 游戏逻辑层（固定逻辑尺寸后统一缩放）
     let worldLayer = null // 世界主层（承载主角、敌机、子弹等）
     let enemyContainer = null // 敌机容器层
     let bulletContainer = null // 主炮子弹容器层
@@ -107,8 +111,6 @@ export class GameController {
     let energyCount = 0 // 当前持有能量豆数量
     let weaponLevel = 1 // 当前武器等级（1~3）
     let currentWeapon = WEAPON_IDS.GUN // 当前激活武器 ID
-    const heroGlobalPoint = new PIXI.Point() // 复用：主角全局坐标缓存
-    const enemyGlobalPoint = new PIXI.Point(0, 0) // 复用：敌机全局坐标缓存
     let unlockKillCount = 0 // 解锁导弹所需目标击杀计数
     let missileWeaponUnlocked = false // 导弹武器是否已解锁
     let weaponCardDropped = false // 是否已经掉落过导弹武器卡
@@ -232,8 +234,8 @@ export class GameController {
       if (!hero) return
       const halfWidth = hero.width / 2 // 主角半宽
       const halfHeight = hero.height / 2 // 主角半高
-      hero.x = Math.max(halfWidth, Math.min(app.renderer.width - halfWidth, hero.x))
-      hero.y = Math.max(halfHeight, Math.min(app.renderer.height - halfHeight, hero.y))
+      hero.x = Math.max(halfWidth, Math.min(LOGICAL_WIDTH - halfWidth, hero.x))
+      hero.y = Math.max(halfHeight, Math.min(LOGICAL_HEIGHT - halfHeight, hero.y))
     }
 
     // 敌机是否处于当前可视区域（用于命中判定过滤）
@@ -273,19 +275,31 @@ export class GameController {
     this.container.appendChild(app.canvas)
     app.stage.sortableChildren = true
 
+    gameLayer = new PIXI.Container()
+    gameLayer.zIndex = 0
+    gameLayer.sortableChildren = true
+    app.stage.addChild(gameLayer)
+
     worldLayer = new PIXI.Container()
     worldLayer.zIndex = 0
-    app.stage.addChild(worldLayer)
+    worldLayer.sortableChildren = true
+    gameLayer.addChild(worldLayer)
 
     // 创建子系统
-    starfieldSystem = createStarfieldSystem(app, worldLayer)
-    explosionSystem = createExplosionSystem(app, worldLayer)
+    starfieldSystem = createStarfieldSystem(app, worldLayer, {
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+    })
+    explosionSystem = createExplosionSystem(app, worldLayer, {
+      targetLayer: worldLayer,
+      overlayLayer: gameLayer,
+    })
     energyOrbSystem = createEnergyOrbSystem(app, worldLayer)
 
     const heroTexture = await PIXI.Assets.load(heroPng)
     hero = new PIXI.Sprite(heroTexture)
     hero.anchor.set(0.5)
-    hero.position.set(app.renderer.width / 2, app.renderer.height * 0.8)
+    hero.position.set(LOGICAL_WIDTH / 2, LOGICAL_HEIGHT * 0.8)
     worldLayer.addChild(hero)
 
     const heroImage = await loadImageElement(heroPng)
@@ -400,7 +414,7 @@ export class GameController {
       enemy.__enemyId = enemyId
       enemy.anchor.set(0.5)
       enemy.scale.set(options.scale ?? 0.33)
-      enemy.x = options.x ?? (90 + Math.random() * Math.max(120, app.renderer.width - 180))
+      enemy.x = options.x ?? (90 + Math.random() * Math.max(120, LOGICAL_WIDTH - 180))
       enemy.y = options.y ?? -Math.max(36, enemy.height / 2)
 
       if (options.motionType === 'snake') {
@@ -420,7 +434,7 @@ export class GameController {
           vx: options.vx ?? 0,
           vy: options.vy ?? enemyMoveSpeed,
           baseX: options.baseX ?? enemy.x,
-          centerX: options.centerX ?? app.renderer.width * 0.5,
+          centerX: options.centerX ?? LOGICAL_WIDTH * 0.5,
           outwardVx: options.outwardVx ?? 0,
           turnY: options.turnY ?? Number.POSITIVE_INFINITY,
           turned: options.turned ?? false,
@@ -456,13 +470,13 @@ export class GameController {
     hudNoticeText.anchor.set(0.5, 0)
     hudNoticeText.zIndex = 2100
     hudNoticeText.visible = false
-    app.stage.addChild(hudNoticeText)
+    gameLayer.addChild(hudNoticeText)
 
     // 手动重刷指定波次（用于开发调试）
     spawnWaveByIds = (waveIds) => {
       if (!spawnEnemyById) return
-      const stageWidth = app.renderer.width
-      const stageHeight = app.renderer.height
+      const stageWidth = LOGICAL_WIDTH
+      const stageHeight = LOGICAL_HEIGHT
       for (const waveId of waveIds) {
         const wave = WAVE_REGISTRY.find((item) => item.id === waveId)
         if (!wave) continue
@@ -475,17 +489,25 @@ export class GameController {
     }
 
     // 创建资料库系统，并同步 React 当前状态
-    this.librarySystem = createLibrarySystem(app, enemyTextures, this.showLibrary)
+    this.librarySystem = createLibrarySystem(app, enemyTextures, this.showLibrary, gameLayer, {
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+    })
     this.librarySystem.setVisible(this.showLibrary)
 
     // 分辨率变化时统一重排
     const layout = () => {
+      const scale = Math.min(app.renderer.width / LOGICAL_WIDTH, app.renderer.height / LOGICAL_HEIGHT)
+      const offsetX = (app.renderer.width - LOGICAL_WIDTH * scale) * 0.5
+      const offsetY = (app.renderer.height - LOGICAL_HEIGHT * scale) * 0.5
+      gameLayer.scale.set(scale)
+      gameLayer.position.set(offsetX, offsetY)
       clampHeroToScreen()
       starfieldSystem.layout()
       explosionSystem.layout()
       this.librarySystem.layout()
       if (hudNoticeText) {
-        hudNoticeText.position.set(app.renderer.width / 2, Math.max(14, app.renderer.height - 86))
+        hudNoticeText.position.set(LOGICAL_WIDTH / 2, Math.max(14, LOGICAL_HEIGHT - 86))
       }
     }
 
@@ -502,8 +524,7 @@ export class GameController {
     // 击毁敌机：爆炸、掉豆、波次回调、解锁统计
     const removeEnemy = (enemy, enemyIndex) => {
       explosionSystem.spawn(enemy.x, enemy.y)
-      const enemyGlobal = enemy.getGlobalPosition(enemyGlobalPoint)
-      energyOrbSystem.spawn(enemyGlobal.x, enemyGlobal.y)
+      energyOrbSystem.spawn(enemy.x, enemy.y)
       enemyContainer.removeChild(enemy)
       alphaMasks.delete(enemy)
       WAVE_REGISTRY.forEach((wave) => wave.onEnemyDestroyed?.(enemy))
@@ -539,8 +560,8 @@ export class GameController {
       if (!hero || !spawnEnemyById) return
 
       const deltaSeconds = app.ticker.deltaMS / 1000 // 本帧耗时（秒）
-      const stageW = app.renderer.width // 当前画布宽度
-      const stageH = app.renderer.height // 当前画布高度
+      const stageW = LOGICAL_WIDTH // 当前逻辑宽度
+      const stageH = LOGICAL_HEIGHT // 当前逻辑高度
 
       elapsedGameTime += deltaSeconds
 
@@ -729,7 +750,7 @@ export class GameController {
       explosionSystem.update(deltaSeconds)
       energyOrbSystem.update(
         deltaSeconds,
-        hero.getGlobalPosition(heroGlobalPoint),
+        hero.position,
         () => {
           energyCount += 1
         },

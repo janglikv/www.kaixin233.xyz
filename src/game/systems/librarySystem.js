@@ -1,11 +1,14 @@
 import * as PIXI from 'pixi.js'
 
 // 资料库系统：展示所有敌机缩略图与编号
-export const createLibrarySystem = (app, enemyTextures, visible) => {
+export const createLibrarySystem = (app, enemyTextures, visible, parentLayer = app.stage, viewport = null) => {
+  const getViewportWidth = () => viewport?.width ?? app.renderer.width
+  const getViewportHeight = () => viewport?.height ?? app.renderer.height
+
   const container = new PIXI.Container()
   container.zIndex = 5000
   container.visible = visible
-  app.stage.addChild(container)
+  parentLayer.addChild(container)
 
   // 蒙层、面板和网格容器
   const backdrop = new PIXI.Graphics()
@@ -50,8 +53,8 @@ export const createLibrarySystem = (app, enemyTextures, visible) => {
 
   // 布局：根据窗口尺寸动态计算列数与单元尺寸
   const layout = () => {
-    const stageW = app.renderer.width
-    const stageH = app.renderer.height
+    const stageW = getViewportWidth()
+    const stageH = getViewportHeight()
 
     backdrop.clear()
     backdrop.rect(0, 0, stageW, stageH).fill(0x000000)
@@ -101,7 +104,7 @@ export const createLibrarySystem = (app, enemyTextures, visible) => {
     container.visible = nextVisible
     if (!nextVisible) return
     layout()
-    app.stage.sortChildren()
+    parentLayer.sortChildren()
   }
 
   return { layout, setVisible, container }

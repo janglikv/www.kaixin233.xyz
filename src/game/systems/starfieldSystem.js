@@ -1,7 +1,10 @@
 import * as PIXI from 'pixi.js'
 
 // 星空背景系统：负责生成星点、布局与匀速滚动
-export const createStarfieldSystem = (app, worldLayer) => {
+export const createStarfieldSystem = (app, worldLayer, viewport) => {
+  const getViewportWidth = () => viewport?.width ?? app.renderer.width
+  const getViewportHeight = () => viewport?.height ?? app.renderer.height
+
   // 统一维护所有星点粒子
   const particles = []
 
@@ -32,8 +35,8 @@ export const createStarfieldSystem = (app, worldLayer) => {
     for (let i = 0; i < count; i += 1) {
       const sprite = new PIXI.Sprite(texture)
       sprite.anchor.set(0.5)
-      sprite.x = Math.random() * app.renderer.width
-      sprite.y = Math.random() * app.renderer.height
+      sprite.x = Math.random() * getViewportWidth()
+      sprite.y = Math.random() * getViewportHeight()
       sprite.alpha = 0.4 + Math.random() * 0.6
       container.addChild(sprite)
 
@@ -55,8 +58,8 @@ export const createStarfieldSystem = (app, worldLayer) => {
 
   // 分辨率变化时重绘背景并修正越界星点
   const layout = () => {
-    const width = app.renderer.width
-    const height = app.renderer.height
+    const width = getViewportWidth()
+    const height = getViewportHeight()
 
     glow.clear()
     glow.rect(0, 0, width, height).fill({ color: 0x0b1521, alpha: 1 })
@@ -69,8 +72,8 @@ export const createStarfieldSystem = (app, worldLayer) => {
 
   // 每帧更新：纵向卷轴滚动 + 闪烁
   const update = (deltaSeconds) => {
-    const width = app.renderer.width
-    const height = app.renderer.height
+    const width = getViewportWidth()
+    const height = getViewportHeight()
 
     for (const particle of particles) {
       const star = particle.sprite

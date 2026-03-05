@@ -5,11 +5,18 @@ import * as PIXI from 'pixi.js'
 // 2) 爆闪
 // 3) 空间扭曲涟漪（位移贴图）
 // 4) 轻微屏幕震动
-export const createExplosionSystem = (app, worldLayer) => {
+export const createExplosionSystem = (app, worldLayer, options = {}) => {
+  const targetLayer = options.targetLayer ?? worldLayer
+  const overlayLayer = options.overlayLayer ?? app.stage
+  const toOverlayPosition = options.toOverlayPosition ?? ((x, y, out) => out.set(x, y))
   const explosionParticles = []
   const blastFlashes = []
-  const distortionRipples = []
-  const activeDistortionFilters = []
+  const rippleState = {
+    active: false,
+    age: 0,
+    life: 0.48,
+    strength: 106,
+  }
 
   const fxContainer = new PIXI.Container()
   fxContainer.zIndex = 40
@@ -40,7 +47,7 @@ export const createExplosionSystem = (app, worldLayer) => {
   const flashTexture = app.renderer.generateTexture(flashShape)
   flashShape.destroy()
 
-  // 生成位移贴图：中心向外的径向偏移
+  // 位移贴图（用于单实例冲击波滤镜）
   const createRippleDisplacementTexture = (size = 256) => {
     const canvas = document.createElement('canvas')
     canvas.width = size
@@ -66,9 +73,9 @@ export const createExplosionSystem = (app, worldLayer) => {
         if (radius < maxRadius) {
           const nx = radius > 1e-4 ? dx / radius : 0
           const ny = radius > 1e-4 ? dy / radius : 0
-          const core = Math.max(0, 1 - radius / (maxRadius * 0.52))
-          const ring = Math.max(0, 1 - Math.abs(radius - maxRadius * 0.68) / (maxRadius * 0.18))
-          const strength = core * 24 + ring * 38
+          const core = Math.max(0, 1 - radius / (maxRadius * 0.54))
+          const ring = Math.max(0, 1 - Math.abs(radius - maxRadius * 0.7) / (maxRadius * 0.2))
+          const strength = core * 24 + ring * 42
           offsetX = nx * strength
           offsetY = ny * strength
         }
@@ -84,42 +91,37 @@ export const createExplosionSystem = (app, worldLayer) => {
     return PIXI.Texture.from(canvas)
   }
 
-  // 位移贴图容器独立挂在 stage，避免被 worldLayer 的滤镜重复影响
-  const distortionMapContainer = new PIXI.Container()
-  distortionMapContainer.zIndex = 30
-  app.stage.addChild(distortionMapContainer)
   const distortionTexture = createRippleDisplacementTexture(256)
+  const mapSprite = new PIXI.Sprite(distortionTexture)
+  mapSprite.anchor.set(0.5)
+  mapSprite.scale.set(0.18)
+  mapSprite.renderable = false
+  mapSprite.visible = false
+  mapSprite.zIndex = 30
+  overlayLayer.addChild(mapSprite)
 
-  // 刷新世界层滤镜列表（支持多重涟漪叠加）
-  const refreshWorldFilters = () => {
-    worldLayer.filters = activeDistortionFilters.length > 0 ? [...activeDistortionFilters] : null
+  const distortionFilter = new PIXI.DisplacementFilter({
+    sprite: mapSprite,
+    scale: { x: 0, y: 0 },
+  })
+  const overlayPoint = new PIXI.Point()
+
+  const refreshTargetFilters = () => {
+    targetLayer.filters = rippleState.active ? [distortionFilter] : null
   }
 
-  // 在指定位置生成一圈空间扭曲
+  // 在指定位置触发位移冲击波（单实例）
   const spawnDistortionRipple = (x, y) => {
-    const mapSprite = new PIXI.Sprite(distortionTexture)
-    mapSprite.anchor.set(0.5)
-    mapSprite.position.set(x, y)
+    const pos = toOverlayPosition(x, y, overlayPoint)
+    mapSprite.position.copyFrom(pos)
     mapSprite.scale.set(0.2)
-    mapSprite.renderable = false
-    distortionMapContainer.addChild(mapSprite)
-
-    const filter = new PIXI.DisplacementFilter({
-      sprite: mapSprite,
-      scale: { x: 108, y: 108 },
-    })
-    activeDistortionFilters.push(filter)
-    refreshWorldFilters()
-
-    distortionRipples.push({
-      sprite: mapSprite,
-      filter,
-      age: 0,
-      life: 0.58,
-      startScale: 0.2,
-      endScale: 2.0,
-      startStrength: 108,
-    })
+    mapSprite.rotation = Math.random() * Math.PI * 2
+    mapSprite.visible = true
+    rippleState.active = true
+    rippleState.age = 0
+    rippleState.life = 0.48
+    rippleState.strength = 106
+    refreshTargetFilters()
   }
 
   // 触发爆炸：组合多种视觉层
@@ -236,10 +238,8 @@ export const createExplosionSystem = (app, worldLayer) => {
     }
   }
 
-  // 画布变化时更新滤镜有效区域
-  const layout = () => {
-    worldLayer.filterArea = new PIXI.Rectangle(0, 0, app.renderer.width, app.renderer.height)
-  }
+  // 预留布局接口（当前不过滤裁剪区域，避免错误裁剪导致内容消失）
+  const layout = () => {}
 
   // 每帧更新：推进粒子、闪光、涟漪与震屏状态
   const update = (deltaSeconds) => {
@@ -288,31 +288,24 @@ export const createExplosionSystem = (app, worldLayer) => {
       flash.sprite.alpha = (1 - t) ** 2
     }
 
-    for (let i = distortionRipples.length - 1; i >= 0; i -= 1) {
-      const ripple = distortionRipples[i]
-      ripple.age += deltaSeconds
-      const t = ripple.age / ripple.life
+    if (rippleState.active) {
+      rippleState.age += deltaSeconds
+      const t = rippleState.age / rippleState.life
       if (t >= 1) {
-        ripple.sprite.parent?.removeChild(ripple.sprite)
-        ripple.sprite.destroy()
-
-        const filterIndex = activeDistortionFilters.indexOf(ripple.filter)
-        if (filterIndex >= 0) {
-          activeDistortionFilters.splice(filterIndex, 1)
-          refreshWorldFilters()
-        }
-
-        distortionRipples.splice(i, 1)
-        continue
+        rippleState.active = false
+        mapSprite.visible = false
+        distortionFilter.scale.x = 0
+        distortionFilter.scale.y = 0
+        refreshTargetFilters()
+      } else {
+        const easeOut = 1 - (1 - t) ** 2
+        const scale = 0.2 + (2.0 - 0.2) * easeOut
+        mapSprite.scale.set(scale)
+        mapSprite.rotation += deltaSeconds * 2.2
+        const strength = rippleState.strength * ((1 - t) ** 0.72) * (0.76 + 0.24 * Math.sin(rippleState.age * 30))
+        distortionFilter.scale.x = strength
+        distortionFilter.scale.y = strength
       }
-
-      const easeOut = 1 - (1 - t) * (1 - t)
-      const scale = ripple.startScale + (ripple.endScale - ripple.startScale) * easeOut
-      ripple.sprite.scale.set(scale)
-      ripple.sprite.rotation += deltaSeconds * 2.5
-      const strength = ripple.startStrength * ((1 - t) ** 0.72) * (0.72 + 0.28 * Math.sin(ripple.age * 30))
-      ripple.filter.scale.x = strength
-      ripple.filter.scale.y = strength
     }
 
     // 不使用震屏时，确保世界层偏移被重置

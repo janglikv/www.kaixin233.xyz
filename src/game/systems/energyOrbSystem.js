@@ -110,6 +110,8 @@ export const createEnergyOrbSystem = (app, worldLayer) => {
         node.y += ny * orb.speed * deltaSeconds
         glow.alpha = 1
         core.alpha = 1
+        glow.scale.set(orb.baseGlowScale)
+        core.scale.set(orb.baseCoreScale)
         glow.tint = 0xffa000
         core.tint = 0xffef8c
       }
