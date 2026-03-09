@@ -19,10 +19,19 @@ const getTurnedXByTravel = ({ baseX, centerX, travelX, direction }) => {
 }
 
 export const updateSnakeTimelineMotion = ({ enemy, motion, deltaSeconds }) => {
+  const spawnY = motion.spawnY ?? -80
+  const speedY = motion.speedY ?? 120
+  const amplitude = motion.amplitude ?? 38
+  const angularSpeed = motion.angularSpeed ?? 3.8
+  const phase = motion.phase ?? 0
+  if (motion.laneX == null) {
+    motion.laneX = enemy.x
+  }
+
   motion.t = (motion.t ?? 0) + deltaSeconds
   const activeT = Math.max(0, motion.t)
-  enemy.y = motion.spawnY + motion.speedY * activeT
-  enemy.x = motion.laneX + Math.sin((motion.phase ?? 0) + motion.angularSpeed * activeT) * motion.amplitude
+  enemy.y = spawnY + speedY * activeT
+  enemy.x = motion.laneX + Math.sin(phase + angularSpeed * activeT) * amplitude
 }
 
 export const updateTurnbackTimelineMotion = ({ enemy, motion, deltaSeconds }) => {

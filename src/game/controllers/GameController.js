@@ -152,7 +152,7 @@ export class GameController {
     const tryAutoUpgradeWeapon = () => {
       while (weaponLevel < 3) {
         const targetLevel = weaponLevel + 1
-        const cost = WEAPON_UPGRADE_COST[targetLevel]
+        const cost = WEAPON_UPGRADE_COST[weaponLevel] ?? WEAPON_UPGRADE_COST[targetLevel]
         if (energyCount < cost) break
         energyCount -= cost
         weaponLevel = targetLevel
