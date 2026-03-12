@@ -1,87 +1,26 @@
-/* 全局重置：统一盒模型，清除默认边距 */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-/* 基础字体与抗锯齿 */
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background: #000;
-  color: #ccc;
-}
-
-/* 补充伪元素盒模型一致性 */
 *,
 *::before,
 *::after {
   box-sizing: border-box;
 }
 
-/* 让应用根节点全屏铺满 */
 html,
 body,
 #root {
+  width: 100%;
   height: 100%;
   margin: 0;
 }
 
-/* 项目主题底色与中文字体栈 */
 body {
-  background: #0a0d12;
-  color: #e8edf2;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top, #202c44 0%, #0f1728 38%, #060913 100%);
+  color: #f3f6fb;
   font-family: 'IBM Plex Sans', 'Noto Sans SC', sans-serif;
 }
 
-/* React 根容器：用于承载按钮与 Pixi 画布 */
-.app-root {
-  height: 100%;
-  width: 100%;
-  overflow: hidden;
-  position: relative;
-}
-
-/* Pixi 画布容器 */
 .game-root {
-  height: 100%;
   width: 100%;
-}
-
-/* DOM UI 统一按逻辑分辨率等比缩放 */
-.ui-scale-root {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 1280px;
-  height: 720px;
-  transform-origin: top left;
-  pointer-events: none;
-  z-index: 99998;
-}
-
-/* 资料库切换按钮：固定在左下角 */
-.library-btn {
-  position: absolute;
-  bottom: 14px;
-  left: 14px;
-  z-index: 1;
-  pointer-events: auto;
-  border: 1px solid #7fb8ff;
-  border-radius: 10px;
-  padding: 8px 14px;
-  background: rgba(12, 28, 45, 0.88);
-  color: #eaf4ff;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-  cursor: pointer;
-}
-
-/* 悬停反馈 */
-.library-btn:hover {
-  background: rgba(17, 39, 62, 0.95);
+  height: 100%;
 }
