@@ -1,14 +1,14 @@
 import * as PIXI from 'pixi.js'
 import heroPng from '../../assets/hero.png'
 import enemyPng from '../../assets/enemy.png'
-import { ENEMY_FRAMES } from '../config'
+import { ENEMY_FRAMES, ENEMY_STATS, DEFAULT_ENEMY_COLLISION_RADIUS } from '../config'
 import { buildAlphaMaskFromImage, loadImageElement } from '../utils/image'
-import { boundsOverlap, pixelPerfectCollides } from '../utils/collision'
+import { boundsOverlap, isOpaqueAtWorldPoint } from '../utils/collision'
 import { createStarfieldSystem } from '../systems/starfieldSystem'
 import { createExplosionSystem } from '../systems/explosionSystem'
 import { createLibrarySystem } from '../systems/librarySystem'
 import { createEnergyOrbSystem } from '../systems/energyOrbSystem'
-import { WAVE_REGISTRY, getNextUntriggeredWave, isRegisteredWaveEnemy } from '../waves/registry'
+import { WAVE_REGISTRY, isRegisteredWaveEnemy } from '../waves/registry'
 import {
   FIRE_INTERVAL_BY_LEVEL,
   MISSILE_UNLOCK_RULE,
@@ -54,33 +54,37 @@ export class GameController {
     const pressedKeys = new Set() // 当前按下的移动键集合（w/a/s/d）
 
     // ===== 运行时容器数据 =====
-    // 像素级碰撞掩码缓存（key: sprite）
-    const alphaMasks = new WeakMap()
     // 场上实体数组（统一由主循环维护）
     const enemySprites = []
     const bulletSprites = []
     const missileSprites = []
+    const enemyBulletSprites = []
 
     // ===== 核心数值配置 =====
     const heroSpeed = 420 // 主角移动速度（像素/秒）
     const enemyMoveSpeed = 120 // 敌机默认下行速度（像素/秒）
     const bulletSpeed = 1200 // 主炮子弹初始速度（像素/秒）
-    const blinkInterval = 0.1 // 受击闪烁每次切换间隔（秒）
-    const blinkTotalToggles = 6 // 闪烁总切换次数（6 次约等于闪 3 下）
-    const travelSpeedMps = 48 // 行进系统里程推进速度（米/秒）
+    const bulletDamage = 1 // 主炮单发伤害
+    const missileDamage = 3 // 导弹单发伤害
+    const enemyBulletDamage = 1 // 敌机单发伤害（当前仅触发受击反馈）
+    const waveRepeatInterval = 10 // 第一波重复进攻间隔（秒）
 
     // ===== 场景节点引用 =====
     let hero = null // 主角精灵
+    let heroAlphaMask = null // 主角像素级碰撞掩码
     let gameLayer = null // 游戏逻辑层（固定逻辑尺寸后统一缩放）
     let worldLayer = null // 世界主层（承载主角、敌机、子弹等）
     let enemyContainer = null // 敌机容器层
+    let enemyHealthBarContainer = null // 敌机血条层
     let bulletContainer = null // 主炮子弹容器层
     let missileContainer = null // 导弹容器层
+    let enemyBulletContainer = null // 敌机子弹容器层
     let resizeHandler = null // renderer 尺寸变化回调引用（用于解绑）
 
     // ===== 工厂函数引用（init 后赋值） =====
     let spawnHeroBullet = null // 主炮发射函数
     let spawnHomingMissiles = null // 导弹发射函数（含末端制导参数）
+    let spawnEnemyBullet = null // 敌机子弹发射函数
     let spawnEnemyById = null // 通用敌机生成函数（按 #ID + 运动参数）
     let spawnWaveByIndex = null // 手动重刷波次函数（按注册顺序索引）
 
@@ -92,13 +96,8 @@ export class GameController {
     let keyboardFiring = false // 键盘开火态（空格）
     let mouseFiring = false // 鼠标开火态（左键）
 
-    let isBlinking = false // 主角是否处于受击闪烁中
-    let blinkElapsed = 0 // 闪烁累计时间
-    let blinkToggleCount = 0 // 已完成闪烁切换次数
-
-    // ===== 里程与刷怪状态 =====
-    let traveledMeters = 0 // 当前累计里程（米）
-    const triggeredWaves = new Set() // 已触发波次集合
+    // ===== 刷怪状态 =====
+    let nextWaveSpawnTime = 0 // 第一波下次自动进攻时间点
 
     // ===== 子系统实例 =====
     let starfieldSystem = null
@@ -113,15 +112,6 @@ export class GameController {
     let weaponCard = null // 场上武器卡精灵引用
     let hudNoticeText = null // 居中提示文本对象
     let hudNoticeUntil = 0 // 提示文本显示截止时间
-
-    // 玩家与敌机碰撞后，触发短时间闪烁（无敌感反馈）
-    const startHeroBlink = () => {
-      if (!hero || isBlinking) return
-      isBlinking = true
-      blinkElapsed = 0
-      blinkToggleCount = 0
-      hero.alpha = 0.25
-    }
 
     // 同步“是否处于持续开火”状态：
     // - 输入来源：空格 + 鼠标左键
@@ -170,17 +160,10 @@ export class GameController {
       if (!event.repeat) {
         if (event.code === 'Digit1') {
           spawnWaveByIndex?.(0)
-        } else if (event.code === 'Digit2') {
-          spawnWaveByIndex?.(1)
-        } else if (event.code === 'Digit3') {
-          spawnWaveByIndex?.(2)
         }
       }
       if (event.code === 'Slash' && !event.repeat) {
-        const nextWave = getNextUntriggeredWave(triggeredWaves) // 下一波未触发波次
-        if (nextWave) {
-          traveledMeters = Math.max(traveledMeters, nextWave.config.triggerMeter)
-        }
+        nextWaveSpawnTime = Math.min(nextWaveSpawnTime, elapsedGameTime)
       }
       if (event.code === 'Space') {
         keyboardFiring = true
@@ -248,6 +231,50 @@ export class GameController {
       )
     }
 
+    const isEnemyBulletHittingHero = (bullet) => {
+      if (!hero || !heroAlphaMask) return false
+
+      const bulletBounds = bullet.getBounds()
+      const heroBounds = hero.getBounds()
+      if (!boundsOverlap(bulletBounds, heroBounds)) return false
+
+      const left = Math.max(bulletBounds.x, heroBounds.x)
+      const top = Math.max(bulletBounds.y, heroBounds.y)
+      const right = Math.min(bulletBounds.x + bulletBounds.width, heroBounds.x + heroBounds.width)
+      const bottom = Math.min(bulletBounds.y + bulletBounds.height, heroBounds.y + heroBounds.height)
+
+      for (let y = Math.floor(top); y < Math.ceil(bottom); y += 1) {
+        for (let x = Math.floor(left); x < Math.ceil(right); x += 1) {
+          if (isOpaqueAtWorldPoint(hero, heroAlphaMask, x + 0.5, y + 0.5)) {
+            return true
+          }
+        }
+      }
+
+      return false
+    }
+
+    const resolveHeroEnemyCollisions = () => {
+      if (!hero) return
+
+      for (const enemy of enemySprites) {
+        const dx = hero.x - enemy.x
+        const dy = hero.y - enemy.y
+        const distance = Math.hypot(dx, dy)
+        const minDistance = (hero.__collisionRadius ?? 24) + (enemy.__collisionRadius ?? DEFAULT_ENEMY_COLLISION_RADIUS)
+        if (distance >= minDistance) continue
+
+        const nx = distance > 1e-6 ? dx / distance : 0
+        const ny = distance > 1e-6 ? dy / distance : -1
+        const overlap = minDistance - distance
+
+        hero.x += nx * overlap
+        hero.y += ny * overlap
+      }
+
+      clampHeroToScreen()
+    }
+
     // 导弹销毁工具：统一删除容器与数组，避免泄漏
     const removeMissile = (missileData, index) => {
       missileContainer.removeChild(missileData.sprite)
@@ -255,10 +282,24 @@ export class GameController {
       missileSprites.splice(index, 1)
     }
 
+    const removeEnemyBullet = (bulletData, index) => {
+      enemyBulletContainer.removeChild(bulletData.sprite)
+      bulletData.sprite.destroy()
+      enemyBulletSprites.splice(index, 1)
+    }
+
     const updateEnemyMotion = (enemy, deltaSeconds) => {
       const motion = enemy.__motion
       if (!motion?.managed || typeof motion.update !== 'function') return false
-      motion.update({ enemy, motion, deltaSeconds })
+      motion.update({
+        enemy,
+        motion,
+        deltaSeconds,
+        hero,
+        enemySprites,
+        elapsedGameTime,
+        spawnEnemyBullet,
+      })
       return true
     }
 
@@ -304,17 +345,18 @@ export class GameController {
 
     const heroTexture = await PIXI.Assets.load(heroPng)
     hero = new PIXI.Sprite(heroTexture)
+    hero.__collisionRadius = 26
     hero.anchor.set(0.5)
     hero.position.set(LOGICAL_WIDTH / 2, LOGICAL_HEIGHT * 0.8)
     worldLayer.addChild(hero)
 
     const heroImage = await loadImageElement(heroPng)
-    alphaMasks.set(hero, buildAlphaMaskFromImage(heroImage, {
+    heroAlphaMask = buildAlphaMaskFromImage(heroImage, {
       x: 0,
       y: 0,
       width: heroImage.width,
       height: heroImage.height,
-    }))
+    })
 
     bulletContainer = new PIXI.Container()
     bulletContainer.zIndex = 20
@@ -323,6 +365,10 @@ export class GameController {
     missileContainer = new PIXI.Container()
     missileContainer.zIndex = 21
     worldLayer.addChild(missileContainer)
+
+    enemyBulletContainer = new PIXI.Container()
+    enemyBulletContainer.zIndex = 24
+    worldLayer.addChild(enemyBulletContainer)
 
     const bulletShape = new PIXI.Graphics()
     bulletShape
@@ -343,6 +389,14 @@ export class GameController {
       .stroke({ color: 0xffffff, width: 1, alpha: 0.9 })
     const missileTexture = app.renderer.generateTexture(missileShape)
     missileShape.destroy()
+
+    const enemyBulletShape = new PIXI.Graphics()
+    enemyBulletShape
+      .circle(0, 0, 3)
+      .fill(0xff7a6b)
+      .stroke({ color: 0xfff4ee, width: 1, alpha: 0.95 })
+    const enemyBulletTexture = app.renderer.generateTexture(enemyBulletShape)
+    enemyBulletShape.destroy()
 
     const weaponCardShape = new PIXI.Graphics()
     weaponCardShape
@@ -404,8 +458,26 @@ export class GameController {
       })
     }
 
+    spawnEnemyBullet = ({ x, y, targetX, targetY, speed = 280 }) => {
+      if (!hero) return
+      const dx = targetX - x
+      const dy = targetY - y
+      const distance = Math.hypot(dx, dy)
+      if (distance <= 1e-6) return
+
+      const bullet = new PIXI.Sprite(enemyBulletTexture)
+      bullet.anchor.set(0.5)
+      bullet.position.set(x, y)
+      enemyBulletContainer.addChild(bullet)
+      enemyBulletSprites.push({
+        sprite: bullet,
+        vx: (dx / distance) * speed,
+        vy: (dy / distance) * speed,
+        damage: enemyBulletDamage,
+      })
+    }
+
     const enemySheet = await PIXI.Assets.load(enemyPng)
-    const enemyImage = await loadImageElement(enemyPng)
     const enemyTextures = ENEMY_FRAMES.map((frame) => new PIXI.Texture({
       source: enemySheet.source,
       frame: new PIXI.Rectangle(frame.x, frame.y, frame.w, frame.h),
@@ -415,31 +487,94 @@ export class GameController {
     enemyContainer.zIndex = 10
     worldLayer.addChild(enemyContainer)
 
+    enemyHealthBarContainer = new PIXI.Container()
+    enemyHealthBarContainer.zIndex = 11
+    worldLayer.addChild(enemyHealthBarContainer)
+
+    const createEnemyHealthBar = (enemy) => {
+      const bar = new PIXI.Graphics()
+      bar.__width = Math.max(28, enemy.width * 0.72)
+      bar.__height = 5
+      enemyHealthBarContainer.addChild(bar)
+      return bar
+    }
+
+    const updateEnemyHealthBar = (enemy) => {
+      const bar = enemy?.__healthBar
+      if (!bar) return
+
+      const width = bar.__width
+      const height = bar.__height
+      const progress = Math.max(0, Math.min(1, enemy.__hp / enemy.__maxHp))
+      const left = enemy.x - width / 2
+      const top = enemy.y - enemy.height * 0.62
+
+      bar.clear()
+      bar.roundRect(left, top, width, height, 999).fill(0x241919)
+      if (progress > 0) {
+        const fillColor = progress > 0.6 ? 0x7cf29a : progress > 0.3 ? 0xf2c55c : 0xff6b6b
+        bar.roundRect(left + 1, top + 1, Math.max(0, (width - 2) * progress), Math.max(0, height - 2), 999).fill(fillColor)
+      }
+      bar.stroke({ color: 0xffffff, width: 1, alpha: 0.9 })
+    }
+
+    const destroyEnemyHealthBar = (enemy) => {
+      if (!enemy?.__healthBar) return
+      enemyHealthBarContainer.removeChild(enemy.__healthBar)
+      enemy.__healthBar.destroy()
+      enemy.__healthBar = null
+    }
+
     // 统一敌机生成入口：按 enemyId 取纹理，并注入运动参数
     spawnEnemyById = (enemyId, options = {}) => {
       const idx = enemyId - 1 // #1 映射到数组索引 0
       if (idx < 0 || idx >= enemyTextures.length) return null
 
-      const frame = ENEMY_FRAMES[idx] // 敌机在雪碧图中的切片数据
+      const enemyStats = ENEMY_STATS[idx] ?? ENEMY_STATS[0]
       const enemy = new PIXI.Sprite(enemyTextures[idx])
       enemy.__enemyId = enemyId
+      enemy.__maxHp = Math.max(1, options.hp ?? enemyStats.hp ?? 1)
+      enemy.__hp = enemy.__maxHp
+      enemy.__baseScale = options.scale ?? 0.33
+      enemy.__collisionRadius = Math.max(
+        8,
+        options.collisionRadius ?? enemyStats.collisionRadius ?? DEFAULT_ENEMY_COLLISION_RADIUS,
+      ) * (enemy.__baseScale / 0.33)
+      enemy.__hitPulseTimer = 0
+      enemy.__hitFlashTimer = 0
       enemy.anchor.set(0.5)
-      enemy.scale.set(options.scale ?? 0.33)
+      enemy.scale.set(enemy.__baseScale)
       enemy.x = options.x ?? (90 + Math.random() * Math.max(120, LOGICAL_WIDTH - 180))
       enemy.y = options.y ?? -Math.max(36, enemy.height / 2)
 
       enemy.__motion = options.motion ? { ...options.motion, managed: true } : null
+      enemy.__wave = options.wave ?? null
+      enemy.__healthBar = createEnemyHealthBar(enemy)
 
       enemyContainer.addChild(enemy)
       enemySprites.push(enemy)
-      alphaMasks.set(enemy, buildAlphaMaskFromImage(enemyImage, {
-        x: frame.x,
-        y: frame.y,
-        width: frame.w,
-        height: frame.h,
-      }))
+      updateEnemyHealthBar(enemy)
 
       return enemy
+    }
+
+    const spawnWave = (wave) => {
+      if (!wave || !spawnEnemyById) return
+
+      const stageWidth = LOGICAL_WIDTH
+      const stageHeight = LOGICAL_HEIGHT
+      const spawnEnemyForWave = (enemyId, options = {}) => {
+        return spawnEnemyById(enemyId, {
+          ...options,
+          wave,
+        })
+      }
+
+      wave.spawn({
+        spawnEnemyById: spawnEnemyForWave,
+        stageWidth,
+        stageHeight,
+      })
     }
 
     hudNoticeText = new PIXI.Text({
@@ -458,16 +593,9 @@ export class GameController {
 
     // 手动重刷指定波次（用于开发调试）
     spawnWaveByIndex = (waveIndex) => {
-      if (!spawnEnemyById) return
       const wave = WAVE_REGISTRY[waveIndex]
       if (!wave) return
-      const stageWidth = LOGICAL_WIDTH
-      const stageHeight = LOGICAL_HEIGHT
-      wave.spawn({
-        spawnEnemyById,
-        stageWidth,
-        stageHeight,
-      })
+      spawnWave(wave)
     }
 
     // 创建资料库系统，并同步 React 当前状态
@@ -508,7 +636,7 @@ export class GameController {
       explosionSystem.spawn(enemy.x, enemy.y)
       energyOrbSystem.spawn(enemy.x, enemy.y)
       enemyContainer.removeChild(enemy)
-      alphaMasks.delete(enemy)
+      destroyEnemyHealthBar(enemy)
       WAVE_REGISTRY.forEach((wave) => wave.onEnemyDestroyed?.(enemy))
 
       if (enemy.__enemyId === MISSILE_UNLOCK_RULE.enemyId) {
@@ -530,10 +658,22 @@ export class GameController {
     // 越界清理敌机（非击毁）：不触发爆炸与掉豆
     const despawnEnemy = (enemy, enemyIndex) => {
       enemyContainer.removeChild(enemy)
-      alphaMasks.delete(enemy)
+      destroyEnemyHealthBar(enemy)
       WAVE_REGISTRY.forEach((wave) => wave.onEnemyDestroyed?.(enemy))
       enemy.destroy()
       enemySprites.splice(enemyIndex, 1)
+    }
+
+    const damageEnemy = (enemy, enemyIndex, damage) => {
+      enemy.__hp = Math.max(0, enemy.__hp - damage)
+      updateEnemyHealthBar(enemy)
+      if (enemy.__hp <= 0) {
+        removeEnemy(enemy, enemyIndex)
+        return true
+      }
+      enemy.__hitPulseTimer = 0.26
+      enemy.__hitFlashTimer = 0.12
+      return false
     }
 
     // ===== 主循环 =====
@@ -576,18 +716,11 @@ export class GameController {
         }
       }
 
-      traveledMeters += travelSpeedMps * deltaSeconds
-
-      // 里程触发波次：每波只触发一次
-      for (const wave of WAVE_REGISTRY) {
-        if (triggeredWaves.has(wave)) continue
-        if (traveledMeters < wave.config.triggerMeter) continue
-        triggeredWaves.add(wave)
-        wave.spawn({
-          spawnEnemyById,
-          stageWidth: stageW,
-          stageHeight: stageH,
-        })
+      // 第一波按固定间隔重复进攻
+      const repeatWave = WAVE_REGISTRY[0]
+      if (repeatWave && elapsedGameTime + 1e-6 >= nextWaveSpawnTime) {
+        spawnWave(repeatWave)
+        nextWaveSpawnTime = elapsedGameTime + waveRepeatInterval
       }
       starfieldSystem.update(deltaSeconds)
 
@@ -601,6 +734,23 @@ export class GameController {
           bulletContainer.removeChild(bullet)
           bullet.destroy()
           bulletSprites.splice(i, 1)
+        }
+      }
+
+      for (let i = enemyBulletSprites.length - 1; i >= 0; i -= 1) {
+        const bulletData = enemyBulletSprites[i]
+        const bullet = bulletData.sprite
+        bullet.x += bulletData.vx * deltaSeconds
+        bullet.y += bulletData.vy * deltaSeconds
+
+        const out = bullet.x < -40 || bullet.x > stageW + 40 || bullet.y < -40 || bullet.y > stageH + 40
+        if (out) {
+          removeEnemyBullet(bulletData, i)
+          continue
+        }
+
+        if (isEnemyBulletHittingHero(bullet)) {
+          removeEnemyBullet(bulletData, i)
         }
       }
 
@@ -668,7 +818,7 @@ export class GameController {
           }
         }
         if (hitEnemyIndex >= 0) {
-          removeEnemy(enemySprites[hitEnemyIndex], hitEnemyIndex)
+          damageEnemy(enemySprites[hitEnemyIndex], hitEnemyIndex, missileDamage)
           removeMissile(missile, mi)
         }
       }
@@ -682,10 +832,14 @@ export class GameController {
           enemy.y += enemyMoveSpeed * deltaSeconds
         }
 
-        // 让敌机“头朝行进方向”
+        // 敌机射击时强制朝向主角；平时只按自身移动方向慢调
         const moveDX = enemy.x - prevX
         const moveDY = enemy.y - prevY
-        if ((moveDX * moveDX + moveDY * moveDY) > 1e-6) {
+        if (enemy.__motion?.shotFaceTimer > 0 && typeof enemy.__motion.faceAngle === 'number') {
+          enemy.rotation = enemy.__motion.faceAngle
+        } else if (typeof enemy.__motion?.faceAngle === 'number') {
+          enemy.rotation = enemy.__motion.faceAngle
+        } else if ((moveDX * moveDX + moveDY * moveDY) > 1e-6) {
           enemy.rotation = Math.atan2(moveDY, moveDX) + Math.PI / 2
         }
 
@@ -704,6 +858,18 @@ export class GameController {
         }
       }
 
+      for (const enemy of enemySprites) {
+        enemy.__hitPulseTimer = Math.max(0, (enemy.__hitPulseTimer ?? 0) - deltaSeconds)
+        enemy.__hitFlashTimer = Math.max(0, (enemy.__hitFlashTimer ?? 0) - deltaSeconds)
+        const hitPulseProgress = (enemy.__hitPulseTimer ?? 0) / 0.26
+        const scaleOffset = Math.sin(hitPulseProgress * Math.PI) * 0.024
+        enemy.scale.set(enemy.__baseScale + scaleOffset)
+        enemy.tint = enemy.__hitFlashTimer > 0 ? 0xffdede : 0xffffff
+        updateEnemyHealthBar(enemy)
+      }
+
+      resolveHeroEnemyCollisions()
+
       // 主炮子弹命中检测
       for (let bi = bulletSprites.length - 1; bi >= 0; bi -= 1) {
         const bulletData = bulletSprites[bi]
@@ -715,7 +881,7 @@ export class GameController {
           const enemy = enemySprites[ei]
           if (!isEnemyInsideScreen(enemy, stageW, stageH)) continue
           if (!boundsOverlap(bulletBounds, enemy.getBounds())) continue
-          removeEnemy(enemy, ei)
+          damageEnemy(enemy, ei, bulletDamage)
           hit = true
           break
         }
@@ -759,29 +925,6 @@ export class GameController {
       if (hudNoticeText) {
         hudNoticeText.visible = elapsedGameTime < hudNoticeUntil
       }
-
-      if (isBlinking) {
-        blinkElapsed += deltaSeconds
-        while (blinkElapsed >= blinkInterval) {
-          blinkElapsed -= blinkInterval
-          blinkToggleCount += 1
-          hero.alpha = hero.alpha < 1 ? 1 : 0.25
-          if (blinkToggleCount >= blinkTotalToggles) {
-            isBlinking = false
-            hero.alpha = 1
-            break
-          }
-        }
-        return
-      }
-
-      // 主角与敌机像素级碰撞
-      for (const enemy of enemySprites) {
-        if (pixelPerfectCollides(hero, enemy, alphaMasks)) {
-          startHeroBlink()
-          break
-        }
-      }
     })
 
     // 统一清理流程：事件解绑、对象销毁、WebGL 资源释放
@@ -805,6 +948,7 @@ export class GameController {
       isFiring = false
       bulletSprites.length = 0
       missileSprites.length = 0
+      enemyBulletSprites.length = 0
       enemySprites.length = 0
 
       if (weaponCard) {

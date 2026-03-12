@@ -22,3 +22,13 @@ export const ENEMY_FRAMES = [
   { x: 1232, y: 733, w: 266, h: 201 },
   { x: 929, y: 741, w: 251, h: 192 },
 ]
+
+// 敌机基础数值（按 #1 ~ #20 对应）
+// 当前未单独配置的机型统一使用默认生命值
+export const DEFAULT_ENEMY_HP = 3
+export const DEFAULT_ENEMY_COLLISION_RADIUS = 18
+
+export const ENEMY_STATS = ENEMY_FRAMES.map(() => ({
+  hp: DEFAULT_ENEMY_HP,
+  collisionRadius: DEFAULT_ENEMY_COLLISION_RADIUS,
+}))
