@@ -29,14 +29,14 @@ const createEngineRuntime = (PIXI, parent, config) => {
   root.addChild(shock)
   parent.addChild(root)
 
-  const spawnParticle = (originX, originY, directionX, directionY, elapsedSeconds, pulse) => {
+  const spawnParticle = (directionX, directionY, elapsedSeconds, pulse) => {
     const type = config.pickType()
     const definition = config.createParticle(type, pulse)
     const graphic = createParticleGraphic(PIXI, definition)
 
     graphic.position.set(
-      originX + (Math.random() - 0.5) * definition.spawnWidth,
-      originY + (Math.random() - 0.5) * definition.spawnHeight,
+      (Math.random() - 0.5) * definition.spawnWidth,
+      (Math.random() - 0.5) * definition.spawnHeight,
     )
     graphic.rotation = definition.rotation ?? Math.atan2(-directionX, directionY)
     trailLayer.addChild(graphic)
@@ -70,14 +70,14 @@ const createEngineRuntime = (PIXI, parent, config) => {
       const { originX, originY, directionX, directionY, pulse, scale = 1 } = state
 
       root.scale.set(scale)
-      root.position.set(originX * (1 - scale), originY * (1 - scale))
+      root.position.set(originX, originY)
 
-      config.drawAura(aura, shock, { originX, originY, pulse })
+      config.drawAura(aura, shock, { originX: 0, originY: 0, pulse })
 
       accumulator += deltaSeconds * config.spawnRate(pulse)
       while (accumulator >= 1) {
         accumulator -= 1
-        spawnParticle(originX, originY, directionX, directionY, elapsedSeconds, pulse)
+        spawnParticle(directionX, directionY, elapsedSeconds, pulse)
       }
 
       for (let index = particles.length - 1; index >= 0; index -= 1) {
