@@ -1,9 +1,13 @@
 import * as PIXI from 'pixi.js'
 import { createBulletSystem } from '../effects/createBulletSystem'
+import { getEnemyCatalogEntryByPluginIndex } from '../data/shipCatalog'
+import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
 import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
+import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
 import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
+import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
 import { createDebugPanel } from '../renderers/createDebugPanel'
 import { createPlayerHealthBar } from '../renderers/createPlayerHealthBar'
 import { createShipScene } from '../renderers/createShipScene'
@@ -23,16 +27,17 @@ const SHIP_BOUND_HALF_WIDTH = 46 * SHIP_SCALE
 const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const WORLD_RADIUS = 0
-const ENEMY_COLUMNS = 12
-const ENEMY_ROWS = 3
+const ENEMY_ROWS = 4
 const ENEMY_SCALE = 0.3
 const ENEMY_TOP = 92
 const ENEMY_ROW_GAP = 72
 const ENEMY_SIDE_MARGIN = 72
 const ENEMY_MAX_HEALTH = 100
-const PLAYER_MAX_HEALTH = 100
-const ENEMY_ATTACK_SPEED = 2
+const PLAYER_MAX_HEALTH = 10
+const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
+const ENEMY_HEALTH_BAR_SHOW_TIME = 1
+const GAME_OVER_FADE_TIME = 1.2
 const PLAYER_STATS = {
   attackPower: 1,
   attackSpeed: 11.5,
@@ -44,6 +49,7 @@ const createEnemyHealthBar = (PIXI) => {
   const container = new PIXI.Container()
   const frame = new PIXI.Graphics()
   const fill = new PIXI.Graphics()
+  let currentRatio = 1
 
   frame
     .roundRect(-24, -4, 48, 8, 4)
@@ -52,40 +58,55 @@ const createEnemyHealthBar = (PIXI) => {
 
   container.addChild(frame)
   container.addChild(fill)
+  container.visible = false
 
   return {
     container,
     update(healthRatio) {
-      const width = Math.max(0, Math.min(1, healthRatio)) * 44
+      currentRatio = Math.max(0, Math.min(1, healthRatio))
+      const width = currentRatio * 44
       fill.clear()
       fill
         .roundRect(-22, -2, width, 4, 2)
         .fill({
-          color: healthRatio > 0.55 ? 0x5fffb2 : healthRatio > 0.25 ? 0xffc857 : 0xff5d73,
+          color: 0xff5d73,
           alpha: 0.95,
         })
+    },
+    setVisibility(progress) {
+      const alpha = Math.max(0, Math.min(1, progress))
+      container.visible = alpha > 0
+      container.alpha = alpha
+    },
+    refresh() {
+      this.update(currentRatio)
     },
   }
 }
 
 const createEnemyFormation = ({ PIXI, parent }) => {
   const enemies = []
-  const spacing = (LOGICAL_WIDTH - ENEMY_SIDE_MARGIN * 2) / (ENEMY_COLUMNS - 1)
+  const enemyCount = EXHAUST_PLUGINS.length
+  const spacing =
+    enemyCount > 1 ? (LOGICAL_WIDTH - ENEMY_SIDE_MARGIN * 2) / (enemyCount - 1) : 0
   const getAliveEnemies = () => enemies.filter((enemy) => enemy.health > 0)
 
   for (let row = 0; row < ENEMY_ROWS; row += 1) {
-    for (let column = 0; column < ENEMY_COLUMNS; column += 1) {
-      const enemyId = row * ENEMY_COLUMNS + column
+    for (let column = 0; column < enemyCount; column += 1) {
+      const enemyId = row * enemyCount + column
+      const exhaustIndex = column
+      const enemyCatalogEntry = getEnemyCatalogEntryByPluginIndex(exhaustIndex)
       const scene = createShipScene({
         x: ENEMY_SIDE_MARGIN + spacing * column,
         y: ENEMY_TOP + ENEMY_ROW_GAP * row,
         shipScale: ENEMY_SCALE,
         shipRotation: Math.PI,
+        shipTheme: enemyCatalogEntry.theme,
       })
       const exhaustSwitcher = createExhaustSwitcher({
         PIXI,
         runtimeLayer: scene.runtimeLayer,
-        initialIndex: Math.floor(Math.random() * 9999),
+        initialIndex: exhaustIndex,
       })
       const healthBar = createEnemyHealthBar(PIXI)
 
@@ -93,7 +114,9 @@ const createEnemyFormation = ({ PIXI, parent }) => {
       parent.addChild(healthBar.container)
       enemies.push({
         id: enemyId,
+        exhaustIndex,
         health: ENEMY_MAX_HEALTH,
+        healthBarTimer: 0,
         scene,
         exhaustSwitcher,
         healthBar,
@@ -128,15 +151,19 @@ const createEnemyFormation = ({ PIXI, parent }) => {
         return null
       }
 
+      const previousHealth = enemy.health
       enemy.health = Math.max(0, enemy.health - damage)
       const alive = enemy.health > 0
+      const died = previousHealth > 0 && !alive
       enemy.scene.shipGroup.visible = alive
-      enemy.healthBar.container.visible = alive
+      enemy.healthBarTimer = alive ? ENEMY_HEALTH_BAR_SHOW_TIME : 0
       enemy.healthBar.update(enemy.health / ENEMY_MAX_HEALTH)
+      enemy.healthBar.setVisibility(alive ? 1 : 0)
 
       return {
         id: enemy.id,
         alive,
+        died,
         health: enemy.health,
         x: enemy.scene.shipX,
         y: enemy.scene.shipY + 8,
@@ -145,8 +172,10 @@ const createEnemyFormation = ({ PIXI, parent }) => {
     update(deltaSeconds, elapsedSeconds) {
       getAliveEnemies().forEach((enemy) => {
         const pulse = 0.82 + Math.sin(elapsedSeconds * 10 + enemy.pulseOffset) * 0.18
+        enemy.healthBarTimer = Math.max(0, enemy.healthBarTimer - deltaSeconds)
         enemy.healthBar.container.position.set(enemy.scene.shipX, enemy.scene.shipY - 40)
-        enemy.healthBar.update(enemy.health / ENEMY_MAX_HEALTH)
+        enemy.healthBar.refresh()
+        enemy.healthBar.setVisibility(enemy.healthBarTimer / ENEMY_HEALTH_BAR_SHOW_TIME)
 
         enemy.scene.flameGlow.scale.set(0.94 + pulse * 0.18, 0.86 + pulse * 0.12)
         enemy.scene.flameCore.scale.set(0.92 + pulse * 0.4, 0.8 + pulse * 0.26)
@@ -224,6 +253,8 @@ export class GameController {
       current: PLAYER_MAX_HEALTH,
       max: PLAYER_MAX_HEALTH,
     }
+    let gameOver = false
+    let gameOverFadeProgress = 0
     const playerStats = { ...PLAYER_STATS }
     worldMask
       .roundRect(
@@ -253,19 +284,93 @@ export class GameController {
       parent: worldLayer,
     })
     const impactEffectSystem = createImpactEffectSystem(worldLayer)
+    const fadeOverlay = new PIXI.Graphics()
+    fadeOverlay
+      .rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
+      .fill({ color: 0x000000, alpha: 1 })
+    fadeOverlay.alpha = 0
+
+    const gameOverText = new PIXI.Text({
+      text: '游戏结束',
+      style: {
+        fill: 0xd62f3f,
+        fontFamily: 'STKaiti, KaiTi, serif',
+        fontSize: 62,
+        fontWeight: '700',
+        letterSpacing: 2,
+        dropShadow: {
+          alpha: 0.35,
+          angle: Math.PI / 2,
+          blur: 10,
+          color: 0x220205,
+          distance: 6,
+        },
+      },
+    })
+    gameOverText.anchor.set(0.5)
+    gameOverText.position.set(LOGICAL_WIDTH * 0.5, LOGICAL_HEIGHT * 0.475)
+    gameOverText.alpha = 0
+
+    const gameOverSubText = new PIXI.Text({
+      text: 'GAME OVER',
+      style: {
+        fill: 0xd62f3f,
+        fontFamily: 'Georgia, serif',
+        fontSize: 18,
+        fontWeight: '700',
+        letterSpacing: 4,
+        dropShadow: {
+          alpha: 0.22,
+          angle: Math.PI / 2,
+          blur: 8,
+          color: 0x140103,
+          distance: 4,
+        },
+      },
+    })
+    gameOverSubText.anchor.set(0.5)
+    gameOverSubText.position.set(LOGICAL_WIDTH * 0.5, LOGICAL_HEIGHT * 0.535)
+    gameOverSubText.alpha = 0
+
+    const triggerGameOver = () => {
+      if (gameOver) return
+      gameOver = true
+      shipScene.shipGroup.visible = false
+      impactEffectSystem.spawn(shipScene.shipX, shipScene.shipY, {
+        scale: 3.2,
+        flashOuterColor: 0xff4c39,
+        flashInnerColor: 0xffd2a6,
+        sparkColors: [0xff3b30, 0xff7a45, 0xffc15a],
+      })
+    }
+
     const enemyBulletSystem = createEnemyBulletSystem(worldLayer, {
       onHit: ({ x, y }) => {
         playerHealth.current = Math.max(0, playerHealth.current - ENEMY_BULLET_DAMAGE)
         playerHealthBar.update(playerHealth.current, playerHealth.max)
-        impactEffectSystem.spawn(x, y, { scale: 0.95 })
+        impactEffectSystem.spawn(x, y, { scale: 0.5 })
+        if (playerHealth.current <= 0) {
+          triggerGameOver()
+        }
       },
     })
     const homingBurstSystem = createHomingBurstSystem({
       parent: worldLayer,
       onImpact: ({ x, y, target }) => {
         const isCrit = Math.random() < playerStats.critChance
-        enemyFormation.applyDamage(target.id, playerStats.attackPower * (isCrit ? 2 : 1))
-        impactEffectSystem.spawn(x, y, { scale: isCrit ? 1.65 : 1.15 })
+        const damagedEnemy = enemyFormation.applyDamage(
+          target.id,
+          playerStats.attackPower * (isCrit ? 2 : 1),
+        )
+        impactEffectSystem.spawn(x, y, { scale: isCrit ? 0.56 : 0.34 })
+        if (damagedEnemy?.died) {
+          impactEffectSystem.spawn(damagedEnemy.x, damagedEnemy.y, {
+            scale: 2.7,
+            flashOuterColor: 0xff5a36,
+            flashInnerColor: 0xffd0a8,
+            sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
+          })
+        }
         return isCrit
       },
     })
@@ -276,8 +381,16 @@ export class GameController {
         const damagedEnemy = enemyFormation.applyDamage(target.id, damage)
 
         impactEffectSystem.spawn(x, y, {
-          scale: isCrit ? 1.7 : 1 + damage / 80,
+          scale: isCrit ? 0.62 : 0.28 + damage / 260,
         })
+        if (damagedEnemy?.died) {
+          impactEffectSystem.spawn(damagedEnemy.x, damagedEnemy.y, {
+            scale: 2.7,
+            flashOuterColor: 0xff5a36,
+            flashInnerColor: 0xffd0a8,
+            sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
+          })
+        }
         if (!isCrit || !damagedEnemy?.alive) return
 
         homingBurstSystem.spawnPair({
@@ -303,19 +416,29 @@ export class GameController {
     })
     const keyboard = createKeyboardController()
     let debugBounds = null
+    let catalogBounds = null
+    let isCatalogVisible = false
     const pointer = createPointerController(app.canvas, {
       shouldStart: (event) => {
         const rect = app.canvas.getBoundingClientRect()
         const logicalX = (event.clientX - rect.left - layoutOffsetX) / layoutScale
         const logicalY = (event.clientY - rect.top - layoutOffsetY) / layoutScale
 
-        return !(
+        const insideDebug =
           debugBounds &&
           logicalX >= debugBounds.left &&
           logicalX <= debugBounds.right &&
           logicalY >= debugBounds.top &&
           logicalY <= debugBounds.bottom
-        )
+        const insideCatalog =
+          isCatalogVisible &&
+          catalogBounds &&
+          logicalX >= catalogBounds.left &&
+          logicalX <= catalogBounds.right &&
+          logicalY >= catalogBounds.top &&
+          logicalY <= catalogBounds.bottom
+
+        return !(insideDebug || insideCatalog)
       },
     })
     const exhaustSwitcher = createExhaustSwitcher({
@@ -326,21 +449,38 @@ export class GameController {
 
     const statsPanel = createStatsPanel({
       x: LOGICAL_WIDTH - 18,
-      y: LOGICAL_HEIGHT - 74,
+      y: LOGICAL_HEIGHT - 114,
       stats: playerStats,
     })
     const playerHealthBar = createPlayerHealthBar({
-      x: LOGICAL_WIDTH * 0.5,
-      y: LOGICAL_HEIGHT - 26,
+      x: LOGICAL_WIDTH - 18,
+      y: LOGICAL_HEIGHT - 16,
       health: playerHealth.current,
       maxHealth: playerHealth.max,
+      width: 144,
+      align: 'right',
+    })
+    const catalogOverlay = createCatalogOverlay({
+      x: 0,
+      y: 0,
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+      entries: SHIP_CATALOG,
+      onClose: () => {
+        catalogOverlay.hide()
+        isCatalogVisible = false
+      },
     })
     const debugPanel = createDebugPanel({
       x: 14,
-      y: LOGICAL_HEIGHT - 182,
+      y: LOGICAL_HEIGHT - 212,
       stats: playerStats,
       onFlameSwitch: () => {
         exhaustSwitcher.switchNext()
+      },
+      onCatalogToggle: () => {
+        catalogOverlay.toggle()
+        isCatalogVisible = catalogOverlay.isVisible()
       },
       onChange: (index, direction) => {
         if (index === 0) {
@@ -365,12 +505,17 @@ export class GameController {
       },
     })
     debugBounds = debugPanel.bounds
+    catalogBounds = catalogOverlay.bounds
     worldLayer.addChild(shipScene.shipGroup)
     gameLayer.addChild(worldLayer)
     gameLayer.addChild(worldMask)
+    gameLayer.addChild(fadeOverlay)
+    gameLayer.addChild(gameOverText)
+    gameLayer.addChild(gameOverSubText)
     gameLayer.addChild(debugPanel.container)
     gameLayer.addChild(playerHealthBar.container)
     gameLayer.addChild(statsPanel.container)
+    gameLayer.addChild(catalogOverlay.container)
 
     let elapsedSeconds = 0
 
@@ -389,7 +534,13 @@ export class GameController {
     const tick = (ticker) => {
       const deltaSeconds = ticker.deltaMS / 1000
       elapsedSeconds += deltaSeconds
-      const { horizontal, vertical } = keyboard.getAxis()
+      if (gameOver) {
+        gameOverFadeProgress = Math.min(
+          1,
+          gameOverFadeProgress + deltaSeconds / GAME_OVER_FADE_TIME,
+        )
+      }
+      const { horizontal, vertical } = gameOver ? { horizontal: 0, vertical: 0 } : keyboard.getAxis()
       const movementLength = Math.hypot(horizontal, vertical) || 1
       const velocityX = (horizontal / movementLength) * SHIP_MOVE_SPEED
       const velocityY = (vertical / movementLength) * SHIP_MOVE_SPEED
@@ -419,27 +570,31 @@ export class GameController {
       shipScene.flameCore.alpha = 0.46 + pulse * 0.14
       shipScene.flameInner.alpha = 0.2 + pulse * 0.1
 
-      exhaustSwitcher.update(deltaSeconds, elapsedSeconds, {
-        originX: shipScene.shipX,
-        originY: shipScene.shipY + SHIP_THRUST_DISTANCE,
-        directionX: 0,
-        directionY: -1,
-        pulse,
-        scale: EFFECT_SCALE,
-      })
+      if (!gameOver) {
+        exhaustSwitcher.update(deltaSeconds, elapsedSeconds, {
+          originX: shipScene.shipX,
+          originY: shipScene.shipY + SHIP_THRUST_DISTANCE,
+          directionX: 0,
+          directionY: -1,
+          pulse,
+          scale: EFFECT_SCALE,
+        })
+      }
       enemyFormation.update(deltaSeconds, elapsedSeconds)
       enemyBulletSystem.update(deltaSeconds, {
         shooters: enemyFormation.getShooters(),
         fireInterval: 1 / ENEMY_ATTACK_SPEED,
-        target: {
-          left: shipScene.shipX - 22,
-          right: shipScene.shipX + 22,
-          top: shipScene.shipY - 34,
-          bottom: shipScene.shipY + 28,
-        },
+        target: gameOver
+          ? null
+          : {
+              left: shipScene.shipX - 22,
+              right: shipScene.shipX + 22,
+              top: shipScene.shipY - 34,
+              bottom: shipScene.shipY + 28,
+            },
       })
       bulletSystem.update(deltaSeconds, {
-        shouldFire: pointer.isFiring(),
+        shouldFire: !gameOver && pointer.isFiring(),
         originX: shipScene.shipX,
         originY: shipScene.shipY - SHIP_MUZZLE_OFFSET,
         targets: enemyFormation.getHitboxes(),
@@ -447,6 +602,17 @@ export class GameController {
       })
       homingBurstSystem.update(deltaSeconds)
       impactEffectSystem.update(deltaSeconds)
+      fadeOverlay.alpha = gameOverFadeProgress * 0.66
+      gameOverText.alpha = Math.max(0, (gameOverFadeProgress - 0.22) / 0.5)
+      gameOverSubText.alpha = Math.max(0, (gameOverFadeProgress - 0.38) / 0.38)
+      gameOverText.position.set(
+        LOGICAL_WIDTH * 0.5,
+        LOGICAL_HEIGHT * 0.475 + (1 - gameOverText.alpha) * 12,
+      )
+      gameOverSubText.position.set(
+        LOGICAL_WIDTH * 0.5,
+        LOGICAL_HEIGHT * 0.535 + (1 - gameOverSubText.alpha) * 8,
+      )
     }
 
     app.renderer.on('resize', layout)

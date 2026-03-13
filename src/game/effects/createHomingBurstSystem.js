@@ -6,6 +6,8 @@ const MISSILE_HIT_RADIUS = 24
 const MISSILE_MAX_TRACKS = 5
 const TRAIL_LENGTH = 40
 const MISSILE_LAUNCH_JITTER = 0.18
+const MISSILE_BIAS_STRENGTH = 0.72
+const MISSILE_BIAS_DECAY = 0.94
 const TRAIL_COLORS = [0xd90429, 0xf72585, 0xff9e00, 0x06d6a0, 0x118ab2, 0x8338ec]
 
 const pickColor = (offset) => TRAIL_COLORS[offset % TRAIL_COLORS.length]
@@ -85,6 +87,7 @@ export const createHomingBurstSystem = ({ parent, onImpact }) => {
     const jitter = (Math.random() * 2 - 1) * MISSILE_LAUNCH_JITTER
     const jitteredDirection = rotateVector(baseDirection.x, baseDirection.y, jitter)
     const direction = normalize(jitteredDirection.x, jitteredDirection.y)
+    const steeringBias = normalize(jitteredDirection.x - baseDirection.x, jitteredDirection.y - baseDirection.y)
 
     sprite.position.set(x, y)
     trail.blendMode = 'add'
@@ -106,6 +109,9 @@ export const createHomingBurstSystem = ({ parent, onImpact }) => {
       hitCount: 0,
       finalPointActive: false,
       finalTarget,
+      biasX: steeringBias.x,
+      biasY: steeringBias.y,
+      biasStrength: MISSILE_BIAS_STRENGTH,
     })
   }
 
@@ -134,10 +140,19 @@ export const createHomingBurstSystem = ({ parent, onImpact }) => {
             missile.target.x - missile.x,
             missile.target.y - missile.y,
           )
+          const desiredDirection = normalize(
+            toTarget.x + missile.biasX * missile.biasStrength,
+            toTarget.y + missile.biasY * missile.biasStrength,
+          )
           missile.velocityX +=
-            (toTarget.x * MISSILE_SPEED - missile.velocityX) * MISSILE_TURN_RATE * deltaSeconds
+            (desiredDirection.x * MISSILE_SPEED - missile.velocityX) *
+            MISSILE_TURN_RATE *
+            deltaSeconds
           missile.velocityY +=
-            (toTarget.y * MISSILE_SPEED - missile.velocityY) * MISSILE_TURN_RATE * deltaSeconds
+            (desiredDirection.y * MISSILE_SPEED - missile.velocityY) *
+            MISSILE_TURN_RATE *
+            deltaSeconds
+          missile.biasStrength *= 1 - (1 - MISSILE_BIAS_DECAY) * deltaSeconds * 60
         }
 
         missile.x += missile.velocityX * deltaSeconds

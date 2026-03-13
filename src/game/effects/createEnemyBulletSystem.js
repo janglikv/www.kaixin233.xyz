@@ -1,6 +1,6 @@
 import * as PIXI from 'pixi.js'
 
-const ENEMY_BULLET_SPEED = 420
+const ENEMY_BULLET_SPEED = 210
 
 export const createEnemyBulletSystem = (parent, options = {}) => {
   const layer = new PIXI.Container()
@@ -13,12 +13,12 @@ export const createEnemyBulletSystem = (parent, options = {}) => {
   const spawnBullet = (x, y) => {
     const bullet = new PIXI.Graphics()
     bullet
-      .roundRect(-2.5, -4, 5, 18, 2)
-      .fill({ color: 0xffb36b, alpha: 0.96 })
-      .roundRect(-1.5, -8, 3, 8, 2)
-      .fill({ color: 0xfff1cf, alpha: 0.92 })
-      .ellipse(0, 10, 6, 9)
-      .fill({ color: 0xff6b35, alpha: 0.24 })
+      .circle(0, 0, 6)
+      .fill({ color: 0xff243d, alpha: 0.96 })
+      .circle(0, 0, 3)
+      .fill({ color: 0xff5b6f, alpha: 0.42 })
+      .circle(0, 0, 10)
+      .fill({ color: 0x7a0014, alpha: 0.24 })
     bullet.blendMode = 'add'
     bullet.position.set(x, y)
     layer.addChild(bullet)

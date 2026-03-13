@@ -1,6 +1,23 @@
 import * as PIXI from 'pixi.js'
 
-export const createShip = () => {
+const DEFAULT_THEME = {
+  wingBase: 0xeaf7ff,
+  wingAccent: 0x8cd8ff,
+  podBase: 0xbfe8ff,
+  hullBase: 0xf1f2f5,
+  hullAccent: 0x18c0f4,
+  hullHighlight: 0xffffff,
+  cockpitBase: 0x03298d,
+  cockpitGlow: 0x97ecff,
+  cockpitAccent: 0x37d1ff,
+  nozzleBase: 0x0079e8,
+  nozzleAccent: 0x12c5ff,
+  nozzleGlow: 0x96efff,
+  outline: 0x0a2d8e,
+}
+
+export const createShip = (theme = {}) => {
+  const colors = { ...DEFAULT_THEME, ...theme }
   const ship = new PIXI.Container()
 
   const leftWing = new PIXI.Graphics()
@@ -12,8 +29,8 @@ export const createShip = () => {
       -38, 62,
       -8, 16,
     ])
-    .fill({ color: 0xeaf7ff, alpha: 1 })
-    .stroke({ color: 0x0a2d8e, width: 3, alpha: 1 })
+    .fill({ color: colors.wingBase, alpha: 1 })
+    .stroke({ color: colors.outline, width: 3, alpha: 1 })
   leftWing
     .poly([
       -28, 4,
@@ -21,7 +38,7 @@ export const createShip = () => {
       -82, 31,
       -40, 54,
     ])
-    .fill({ color: 0x8cd8ff, alpha: 0.95 })
+    .fill({ color: colors.wingAccent, alpha: 0.95 })
   ship.addChild(leftWing)
 
   const rightWing = new PIXI.Graphics()
@@ -33,8 +50,8 @@ export const createShip = () => {
       38, 62,
       8, 16,
     ])
-    .fill({ color: 0xeaf7ff, alpha: 1 })
-    .stroke({ color: 0x0a2d8e, width: 3, alpha: 1 })
+    .fill({ color: colors.wingBase, alpha: 1 })
+    .stroke({ color: colors.outline, width: 3, alpha: 1 })
   rightWing
     .poly([
       28, 4,
@@ -42,18 +59,18 @@ export const createShip = () => {
       82, 31,
       40, 54,
     ])
-    .fill({ color: 0x8cd8ff, alpha: 0.95 })
+    .fill({ color: colors.wingAccent, alpha: 0.95 })
   ship.addChild(rightWing)
 
   const sidePods = new PIXI.Graphics()
   sidePods
     .roundRect(-52, 6, 18, 38, 10)
-    .fill({ color: 0xbfe8ff, alpha: 1 })
-    .stroke({ color: 0x0a2d8e, width: 3, alpha: 1 })
+    .fill({ color: colors.podBase, alpha: 1 })
+    .stroke({ color: colors.outline, width: 3, alpha: 1 })
   sidePods
     .roundRect(34, 6, 18, 38, 10)
-    .fill({ color: 0xbfe8ff, alpha: 1 })
-    .stroke({ color: 0x0a2d8e, width: 3, alpha: 1 })
+    .fill({ color: colors.podBase, alpha: 1 })
+    .stroke({ color: colors.outline, width: 3, alpha: 1 })
   ship.addChild(sidePods)
 
   const hull = new PIXI.Graphics()
@@ -70,8 +87,8 @@ export const createShip = () => {
       22, -48,
       12, -60,
     ])
-    .fill({ color: 0xf1f2f5, alpha: 1 })
-    .stroke({ color: 0x0a2d8e, width: 3, alpha: 1 })
+    .fill({ color: colors.hullBase, alpha: 1 })
+    .stroke({ color: colors.outline, width: 3, alpha: 1 })
   hull
     .poly([
       -6, -54,
@@ -83,7 +100,7 @@ export const createShip = () => {
       12, -42,
       6, -54,
     ])
-    .fill({ color: 0x18c0f4, alpha: 0.95 })
+    .fill({ color: colors.hullAccent, alpha: 0.95 })
   hull
     .poly([
       -5, -54,
@@ -91,36 +108,36 @@ export const createShip = () => {
       -6, 36,
       -16, 16,
     ])
-    .fill({ color: 0xffffff, alpha: 0.75 })
+    .fill({ color: colors.hullHighlight, alpha: 0.75 })
   ship.addChild(hull)
 
   const cockpit = new PIXI.Graphics()
   cockpit
     .roundRect(-22, -54, 44, 58, 18)
-    .fill({ color: 0x03298d, alpha: 1 })
-    .stroke({ color: 0x0a2d8e, width: 3, alpha: 1 })
+    .fill({ color: colors.cockpitBase, alpha: 1 })
+    .stroke({ color: colors.outline, width: 3, alpha: 1 })
   cockpit
     .ellipse(-2, -30, 10, 18)
-    .fill({ color: 0x97ecff, alpha: 0.9 })
+    .fill({ color: colors.cockpitGlow, alpha: 0.9 })
   cockpit
     .ellipse(-6, -38, 5, 8)
-    .fill({ color: 0xffffff, alpha: 0.7 })
+    .fill({ color: colors.hullHighlight, alpha: 0.7 })
   cockpit
     .ellipse(8, -2, 14, 6)
-    .fill({ color: 0x37d1ff, alpha: 0.95 })
+    .fill({ color: colors.cockpitAccent, alpha: 0.95 })
   ship.addChild(cockpit)
 
   const nozzle = new PIXI.Graphics()
   nozzle
     .roundRect(-26, 44, 52, 34, 16)
-    .fill({ color: 0x0079e8, alpha: 1 })
-    .stroke({ color: 0x0a2d8e, width: 4, alpha: 1 })
+    .fill({ color: colors.nozzleBase, alpha: 1 })
+    .stroke({ color: colors.outline, width: 4, alpha: 1 })
   nozzle
     .roundRect(-18, 50, 36, 22, 11)
-    .fill({ color: 0x12c5ff, alpha: 0.96 })
+    .fill({ color: colors.nozzleAccent, alpha: 0.96 })
   nozzle
     .ellipse(0, 60, 16, 6)
-    .fill({ color: 0x96efff, alpha: 0.82 })
+    .fill({ color: colors.nozzleGlow, alpha: 0.82 })
   ship.addChild(nozzle)
 
   const flameGlow = new PIXI.Graphics()

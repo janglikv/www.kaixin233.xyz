@@ -1,10 +1,10 @@
 import * as PIXI from 'pixi.js'
 import { createShip } from './createShip'
 
-export const createShipScene = ({ x, y, shipScale, shipRotation = 0 }) => {
+export const createShipScene = ({ x, y, shipScale, shipRotation = 0, shipTheme }) => {
   const shipGroup = new PIXI.Container()
   const runtimeLayer = new PIXI.Container()
-  const { ship, flameGlow, flameCore, flameInner } = createShip()
+  const { ship, flameGlow, flameCore, flameInner } = createShip(shipTheme)
   let shipX = x
   let shipY = y
 

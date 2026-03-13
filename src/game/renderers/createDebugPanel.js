@@ -1,7 +1,7 @@
 import * as PIXI from 'pixi.js'
 
 const PANEL_WIDTH = 190
-const PANEL_HEIGHT = 168
+const PANEL_HEIGHT = 202
 const ROW_START_Y = 42
 const ROW_GAP = 34
 const BUTTON_SIZE = 24
@@ -105,7 +105,7 @@ const createFlameButton = ({ x, y, onTap }) => {
   return button
 }
 
-export const createDebugPanel = ({ x, y, stats, onFlameSwitch, onChange }) => {
+export const createDebugPanel = ({ x, y, stats, onFlameSwitch, onChange, onCatalogToggle }) => {
   const panel = new PIXI.Container()
   panel.position.set(x, y)
 
@@ -193,6 +193,26 @@ export const createDebugPanel = ({ x, y, stats, onFlameSwitch, onChange }) => {
       x: PANEL_WIDTH - BUTTON_SIZE - 14,
       y: 138,
       onTap: onFlameSwitch,
+    }),
+  )
+
+  const catalogLabel = new PIXI.Text({
+    text: '资料库',
+    style: {
+      fill: 0xc7dbff,
+      fontFamily: 'IBM Plex Mono, monospace',
+      fontSize: 13,
+    },
+  })
+  catalogLabel.position.set(14, 174)
+  panel.addChild(catalogLabel)
+
+  panel.addChild(
+    createBoxButton({
+      x: PANEL_WIDTH - BUTTON_SIZE - 14,
+      y: 166,
+      label: '录',
+      onTap: onCatalogToggle,
     }),
   )
 

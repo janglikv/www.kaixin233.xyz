@@ -8,12 +8,15 @@ export const createImpactEffectSystem = (parent) => {
 
   const spawn = (x, y, options = {}) => {
     const scale = options.scale ?? 1
+    const flashOuterColor = options.flashOuterColor ?? 0xffd166
+    const flashInnerColor = options.flashInnerColor ?? 0xffffff
+    const sparkColors = options.sparkColors ?? [0xffb347, 0x8ed7ff]
     const flash = new PIXI.Graphics()
     flash
       .circle(0, 0, 12 * scale)
-      .fill({ color: 0xffd166, alpha: 0.9 })
+      .fill({ color: flashOuterColor, alpha: 0.9 })
       .circle(0, 0, 6 * scale)
-      .fill({ color: 0xffffff, alpha: 0.86 })
+      .fill({ color: flashInnerColor, alpha: 0.86 })
     flash.blendMode = 'add'
     flash.position.set(x, y)
     layer.addChild(flash)
@@ -24,7 +27,7 @@ export const createImpactEffectSystem = (parent) => {
       spark
         .roundRect(-1.5, -6, 3, 12, 2)
         .fill({
-          color: index % 2 === 0 ? 0xffb347 : 0x8ed7ff,
+          color: sparkColors[index % sparkColors.length],
           alpha: 0.92,
         })
       spark.blendMode = 'add'

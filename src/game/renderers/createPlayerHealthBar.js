@@ -1,9 +1,17 @@
 import * as PIXI from 'pixi.js'
 
-const BAR_WIDTH = 440
+const DEFAULT_BAR_WIDTH = 440
 const BAR_HEIGHT = 22
+const OUTER_PADDING = 3
 
-export const createPlayerHealthBar = ({ x, y, health, maxHealth }) => {
+export const createPlayerHealthBar = ({
+  x,
+  y,
+  health,
+  maxHealth,
+  width = DEFAULT_BAR_WIDTH,
+  align = 'center',
+}) => {
   const container = new PIXI.Container()
   const shell = new PIXI.Graphics()
   const track = new PIXI.Graphics()
@@ -22,14 +30,19 @@ export const createPlayerHealthBar = ({ x, y, health, maxHealth }) => {
   })
 
   container.position.set(x, y)
+  const outerWidth = width
+  const innerWidth = width - OUTER_PADDING * 2
+  const shellLeft = align === 'right' ? -outerWidth : -outerWidth * 0.5
+  const trackLeft = shellLeft + OUTER_PADDING
+  const textX = align === 'right' ? -outerWidth * 0.5 : 0
 
   shell
-    .roundRect(-BAR_WIDTH * 0.5 - 8, -BAR_HEIGHT * 0.5 - 8, BAR_WIDTH + 16, BAR_HEIGHT + 16, 16)
+    .roundRect(shellLeft, -BAR_HEIGHT * 0.5 - OUTER_PADDING, outerWidth, BAR_HEIGHT + OUTER_PADDING * 2, 7)
     .fill({ color: 0x040814, alpha: 0.94 })
     .stroke({ color: 0x48638f, width: 2, alpha: 0.95 })
 
   track
-    .roundRect(-BAR_WIDTH * 0.5, -BAR_HEIGHT * 0.5, BAR_WIDTH, BAR_HEIGHT, 11)
+    .roundRect(trackLeft, -BAR_HEIGHT * 0.5, innerWidth, BAR_HEIGHT, 5)
     .fill({ color: 0x091226, alpha: 0.98 })
 
   container.addChild(shell)
@@ -38,12 +51,12 @@ export const createPlayerHealthBar = ({ x, y, health, maxHealth }) => {
   container.addChild(gloss)
 
   text.anchor.set(0.5)
-  text.position.set(0, 0)
+  text.position.set(textX, 0)
   container.addChild(text)
 
   const update = (nextHealth, nextMaxHealth = maxHealth) => {
     const ratio = Math.max(0, Math.min(1, nextHealth / nextMaxHealth))
-    const fillWidth = BAR_WIDTH * ratio
+    const fillWidth = innerWidth * ratio
     const barColor = ratio > 0.55 ? 0x43d17f : ratio > 0.25 ? 0xf0b64a : 0xe14d67
 
     fill.clear()
@@ -51,14 +64,14 @@ export const createPlayerHealthBar = ({ x, y, health, maxHealth }) => {
 
     if (fillWidth > 0) {
       fill
-        .roundRect(-BAR_WIDTH * 0.5, -BAR_HEIGHT * 0.5, fillWidth, BAR_HEIGHT, 11)
+        .roundRect(trackLeft, -BAR_HEIGHT * 0.5, fillWidth, BAR_HEIGHT, 5)
         .fill({ color: barColor, alpha: 0.98 })
       gloss
-        .roundRect(-BAR_WIDTH * 0.5 + 4, -BAR_HEIGHT * 0.5 + 3, Math.max(0, fillWidth - 8), 6, 4)
+        .roundRect(trackLeft + 3, -BAR_HEIGHT * 0.5 + 3, Math.max(0, fillWidth - 6), 6, 3)
         .fill({ color: 0xffffff, alpha: 0.16 })
     }
 
-    text.text = `${Math.ceil(nextHealth)} / ${nextMaxHealth}`
+    text.text = `${Math.ceil(nextHealth)}`
   }
 
   update(health, maxHealth)
