@@ -27,7 +27,7 @@ const SHIP_BOUND_HALF_WIDTH = 46 * SHIP_SCALE
 const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const WORLD_RADIUS = 0
-const ENEMY_ROWS = 4
+const ENEMY_ROWS = 0
 const ENEMY_SCALE = 0.3
 const ENEMY_TOP = 92
 const ENEMY_ROW_GAP = 72
@@ -248,6 +248,7 @@ export class GameController {
     let layoutOffsetY = 0
 
     const worldLayer = new PIXI.Container()
+    const gameOverLayer = new PIXI.Container()
     const worldMask = new PIXI.Graphics()
     const playerHealth = {
       current: PLAYER_MAX_HEALTH,
@@ -507,15 +508,17 @@ export class GameController {
     debugBounds = debugPanel.bounds
     catalogBounds = catalogOverlay.bounds
     worldLayer.addChild(shipScene.shipGroup)
+    gameOverLayer.addChild(fadeOverlay)
+    gameOverLayer.addChild(gameOverText)
+    gameOverLayer.addChild(gameOverSubText)
+
     gameLayer.addChild(worldLayer)
     gameLayer.addChild(worldMask)
-    gameLayer.addChild(fadeOverlay)
-    gameLayer.addChild(gameOverText)
-    gameLayer.addChild(gameOverSubText)
     gameLayer.addChild(debugPanel.container)
     gameLayer.addChild(playerHealthBar.container)
     gameLayer.addChild(statsPanel.container)
     gameLayer.addChild(catalogOverlay.container)
+    gameLayer.addChild(gameOverLayer)
 
     let elapsedSeconds = 0
 

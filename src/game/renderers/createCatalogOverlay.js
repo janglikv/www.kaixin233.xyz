@@ -19,7 +19,7 @@ const createPreviewCard = (entry, x, y) => {
     style: {
       fill: entry.role === 'player' ? 0x72efdd : 0xff8fab,
       fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 11,
+      fontSize: 22,
       fontWeight: '700',
     },
   })
