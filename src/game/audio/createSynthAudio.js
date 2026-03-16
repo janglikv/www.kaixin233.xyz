@@ -472,6 +472,7 @@ export const createSynthAudio = () => {
   let unlocked = false
   let building = null
   let gameOverPlayed = false
+  let musicEnabled = true
   let playerShotCooldown = 0
   let enemyShotCooldown = 0
   let hitCooldown = 0
@@ -543,7 +544,7 @@ export const createSynthAudio = () => {
   }
 
   const ensureMusic = () => {
-    if (!ready() || musicSource) return
+    if (!ready() || musicSource || !musicEnabled) return
     musicSource = context.createBufferSource()
     musicSource.buffer = bufferBank.musicLoop
     musicSource.loop = true
@@ -621,10 +622,29 @@ export const createSynthAudio = () => {
     resetRunState() {
       gameOverPlayed = false
       if (!ready()) return
-      ensureMusic()
+      if (musicEnabled) {
+        ensureMusic()
+      } else {
+        stopMusic()
+      }
       musicGain.gain.cancelScheduledValues(context.currentTime)
       musicGain.gain.setValueAtTime(musicGain.gain.value, context.currentTime)
-      musicGain.gain.linearRampToValueAtTime(0.36, context.currentTime + 0.16)
+      musicGain.gain.linearRampToValueAtTime(musicEnabled ? 0.36 : 0, context.currentTime + 0.16)
+    },
+    isMusicEnabled() {
+      return musicEnabled
+    },
+    setMusicEnabled(nextEnabled) {
+      musicEnabled = Boolean(nextEnabled)
+      if (!context || !musicGain) return
+      if (musicEnabled) {
+        ensureMusic()
+      } else {
+        stopMusic()
+      }
+      musicGain.gain.cancelScheduledValues(context.currentTime)
+      musicGain.gain.setValueAtTime(musicGain.gain.value, context.currentTime)
+      musicGain.gain.linearRampToValueAtTime(musicEnabled ? 0.36 : 0, context.currentTime + 0.12)
     },
     setMasterVolume(value) {
       if (!masterGain) return

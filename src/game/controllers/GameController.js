@@ -10,6 +10,8 @@ import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
 import { createDebugPanel } from '../renderers/createDebugPanel'
 import { createPlayerHealthBar } from '../renderers/createPlayerHealthBar'
+import { createSettingsButton } from '../renderers/createSettingsButton'
+import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
 import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { createStatsPanel } from '../renderers/createStatsPanel'
@@ -603,7 +605,10 @@ export class GameController {
     const keyboard = createKeyboardController()
     let debugBounds = null
     let catalogBounds = null
+    let settingsButtonBounds = null
+    let settingsBounds = null
     let isCatalogVisible = false
+    let isSettingsVisible = false
     const unlockAudio = () => {
       audio.unlock()
     }
@@ -627,8 +632,21 @@ export class GameController {
           logicalX <= catalogBounds.right &&
           logicalY >= catalogBounds.top &&
           logicalY <= catalogBounds.bottom
+        const insideSettingsButton =
+          settingsButtonBounds &&
+          logicalX >= settingsButtonBounds.left &&
+          logicalX <= settingsButtonBounds.right &&
+          logicalY >= settingsButtonBounds.top &&
+          logicalY <= settingsButtonBounds.bottom
+        const insideSettings =
+          isSettingsVisible &&
+          settingsBounds &&
+          logicalX >= settingsBounds.left &&
+          logicalX <= settingsBounds.right &&
+          logicalY >= settingsBounds.top &&
+          logicalY <= settingsBounds.bottom
 
-        return !(insideDebug || insideCatalog)
+        return !(insideDebug || insideCatalog || insideSettingsButton || insideSettings)
       },
     })
     const exhaustSwitcher = createExhaustSwitcher({
@@ -660,6 +678,43 @@ export class GameController {
         audio.playUiClick()
         catalogOverlay.hide()
         isCatalogVisible = false
+      },
+    })
+    const settingsOverlay = createSettingsOverlay({
+      x: 0,
+      y: 0,
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+      musicEnabled: audio.isMusicEnabled(),
+      onMusicToggle: (enabled) => {
+        audio.playUiClick({ high: enabled })
+        audio.setMusicEnabled(enabled)
+        settingsOverlay.update({ musicEnabled: enabled })
+      },
+      onClose: () => {
+        audio.playUiClick()
+        settingsOverlay.hide()
+        isSettingsVisible = false
+      },
+    })
+    const fpsText = new PIXI.Text({
+      text: 'FPS 0',
+      style: {
+        fill: 0xe9f4ff,
+        fontFamily: 'IBM Plex Mono, monospace',
+        fontSize: 14,
+        fontWeight: '700',
+      },
+    })
+    fpsText.position.set(14, 18)
+    const settingsButton = createSettingsButton({
+      x: LOGICAL_WIDTH - 48,
+      y: 14,
+      onTap: () => {
+        audio.playUiClick()
+        settingsOverlay.toggle()
+        isSettingsVisible = settingsOverlay.isVisible()
+        settingsOverlay.update({ musicEnabled: audio.isMusicEnabled() })
       },
     })
     const debugPanel = createDebugPanel({
@@ -700,6 +755,8 @@ export class GameController {
     })
     debugBounds = debugPanel.bounds
     catalogBounds = catalogOverlay.bounds
+    settingsBounds = settingsOverlay.bounds
+    settingsButtonBounds = settingsButton.bounds
     worldLayer.addChild(shipScene.shipGroup)
     gameOverLayer.addChild(fadeOverlay)
     gameOverLayer.addChild(gameOverText)
@@ -707,13 +764,18 @@ export class GameController {
 
     gameLayer.addChild(worldLayer)
     gameLayer.addChild(worldMask)
+    gameLayer.addChild(fpsText)
+    gameLayer.addChild(settingsButton.container)
     gameLayer.addChild(debugPanel.container)
     gameLayer.addChild(playerHealthBar.container)
     gameLayer.addChild(statsPanel.container)
     gameLayer.addChild(catalogOverlay.container)
+    gameLayer.addChild(settingsOverlay.container)
     gameLayer.addChild(gameOverLayer)
 
     let elapsedSeconds = 0
+    let fpsSampleElapsed = 0
+    let fpsFrameCount = 0
 
     const layout = () => {
       layoutScale = Math.min(
@@ -730,6 +792,13 @@ export class GameController {
     const tick = (ticker) => {
       const deltaSeconds = ticker.deltaMS / 1000
       elapsedSeconds += deltaSeconds
+      fpsSampleElapsed += deltaSeconds
+      fpsFrameCount += 1
+      if (fpsSampleElapsed >= 0.2) {
+        fpsText.text = `FPS ${Math.round(fpsFrameCount / fpsSampleElapsed)}`
+        fpsSampleElapsed = 0
+        fpsFrameCount = 0
+      }
       if (gameOver) {
         gameOverFadeProgress = Math.min(
           1,
