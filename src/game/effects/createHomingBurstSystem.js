@@ -4,7 +4,7 @@ const MISSILE_SPEED = 1280
 const MISSILE_TURN_RATE = 5.8
 const MISSILE_HIT_RADIUS = 24
 const MISSILE_MAX_TRACKS = 5
-const TRAIL_LENGTH = 40
+const TRAIL_LENGTH = 36
 const MISSILE_LAUNCH_JITTER = 0.18
 const MISSILE_BIAS_STRENGTH = 0.72
 const MISSILE_BIAS_DECAY = 0.94
@@ -27,6 +27,14 @@ const createMissileGraphic = () => {
   return graphic
 }
 
+const createTrailSegment = () => {
+  const sprite = new PIXI.Sprite(PIXI.Texture.WHITE)
+  sprite.anchor.set(0, 0.5)
+  sprite.blendMode = 'add'
+  sprite.visible = false
+  return sprite
+}
+
 const normalize = (x, y) => {
   const length = Math.hypot(x, y) || 1
   return { x: x / length, y: y / length }
@@ -44,7 +52,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
 
   const removeMissile = (index) => {
     const missile = missiles[index]
-    missile.trail.destroy()
+    missile.trail.destroy({ children: true })
     missile.sprite.destroy()
     missiles.splice(index, 1)
   }
@@ -75,7 +83,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
 
   const spawnMissile = ({ x, y, side, colorOffset, target, getTargets }) => {
     const sprite = createMissileGraphic()
-    const trail = new PIXI.Graphics()
+    const trail = new PIXI.Container()
     const baseDirection = normalize(side * 0.85, -1)
     const jitter = (Math.random() * 2 - 1) * MISSILE_LAUNCH_JITTER
     const jitteredDirection = rotateVector(baseDirection.x, baseDirection.y, jitter)
@@ -83,7 +91,8 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
     const steeringBias = normalize(jitteredDirection.x - baseDirection.x, jitteredDirection.y - baseDirection.y)
 
     sprite.position.set(x, y)
-    trail.blendMode = 'add'
+    const trailSegments = Array.from({ length: TRAIL_LENGTH - 1 }, () => createTrailSegment())
+    trailSegments.forEach((segment) => trail.addChild(segment))
     layer.addChild(trail)
     layer.addChild(sprite)
 
@@ -95,6 +104,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
       target,
       getTargets,
       trail,
+      trailSegments,
       sprite,
       history: Array.from({ length: TRAIL_LENGTH }, () => ({ x, y })),
       colorOffset,
@@ -164,16 +174,27 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
         missile.history.unshift({ x: missile.x, y: missile.y })
         missile.history.length = TRAIL_LENGTH
 
-        missile.trail.clear()
-        for (let trailIndex = 0; trailIndex < missile.history.length; trailIndex += 1) {
-          const point = missile.history[trailIndex]
-          const progress = 1 - trailIndex / missile.history.length
-          missile.trail
-            .circle(point.x, point.y, 1.6 + progress * 5.2)
-            .fill({
-              color: pickColor(missile.colorOffset + trailIndex),
-              alpha: progress * 0.34,
-            })
+        for (let trailIndex = 0; trailIndex < missile.trailSegments.length; trailIndex += 1) {
+          const fromPoint = missile.history[trailIndex]
+          const toPoint = missile.history[trailIndex + 1]
+          const segment = missile.trailSegments[trailIndex]
+          const progress = 1 - trailIndex / missile.trailSegments.length
+          const dx = toPoint.x - fromPoint.x
+          const dy = toPoint.y - fromPoint.y
+          const length = Math.hypot(dx, dy)
+
+          if (length < 0.001) {
+            segment.visible = false
+            continue
+          }
+
+          segment.visible = true
+          segment.position.set(fromPoint.x, fromPoint.y)
+          segment.rotation = Math.atan2(dy, dx)
+          segment.width = length
+          segment.height = 1.5 + progress * 5
+          segment.tint = pickColor(missile.colorOffset + trailIndex)
+          segment.alpha = 0.14 + progress * 0.62
         }
 
         const collisionTarget =
