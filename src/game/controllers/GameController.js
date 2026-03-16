@@ -53,6 +53,7 @@ const PLAYER_STATS = {
   critChance: 1,
 }
 const GAME_SETTINGS_DEFAULTS = {
+  pressureTestEnabled: true,
   musicEnabled: true,
   fpsEnabled: true,
   impactEffectsEnabled: true,
@@ -69,6 +70,7 @@ const clampExhaustIndex = (value) =>
   clamp(Number.isFinite(value) ? Math.floor(value) : 0, 0, Math.max(0, EXHAUST_PLUGINS.length - 1))
 
 const normalizeGameSettings = (settings) => ({
+  pressureTestEnabled: settings.pressureTestEnabled !== false,
   musicEnabled: Boolean(settings.musicEnabled),
   fpsEnabled: settings.fpsEnabled !== false,
   impactEffectsEnabled: settings.impactEffectsEnabled !== false,
@@ -455,20 +457,20 @@ export class GameController {
         }
         if (!isCrit || !damagedEnemy) return
 
-        const followUpTarget =
-          enemyFormation
-            .getHitboxes()
-            .filter((enemy) => enemy.id !== damagedEnemy.id)
-            .map((enemy) => ({
-              id: enemy.id,
-              x: enemy.centerX,
-              y: enemy.centerY,
-            }))
-            .sort((left, right) => {
-              const leftDistance = Math.hypot(left.x - damagedEnemy.x, left.y - damagedEnemy.y)
-              const rightDistance = Math.hypot(right.x - damagedEnemy.x, right.y - damagedEnemy.y)
-              return leftDistance - rightDistance
-            })[0] ?? null
+        let followUpTarget = null
+        let followUpDistance = Infinity
+
+        enemyFormation.getHitboxes().forEach((enemy) => {
+          if (enemy.id === damagedEnemy.id) return
+          const distance = Math.hypot(enemy.centerX - damagedEnemy.x, enemy.centerY - damagedEnemy.y)
+          if (distance >= followUpDistance) return
+          followUpDistance = distance
+          followUpTarget = {
+            id: enemy.id,
+            x: enemy.centerX,
+            y: enemy.centerY,
+          }
+        })
 
         homingBurstSystem.spawnPair({
           x: shipScene.shipX,
@@ -489,12 +491,14 @@ export class GameController {
     let settingsBounds = null
     let isCatalogVisible = false
     let isSettingsVisible = false
+    let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let isFpsVisible = persistedSettings.fpsEnabled
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
     let currentExhaustIndex = persistedSettings.exhaustIndex
     const persistSettings = () => {
       saveGameSettings(
         normalizeGameSettings({
+          pressureTestEnabled: isPressureTestEnabled,
           musicEnabled: audio.isMusicEnabled(),
           fpsEnabled: isFpsVisible,
           impactEffectsEnabled: isImpactEffectsEnabled,
@@ -506,6 +510,7 @@ export class GameController {
       )
     }
     const getSettingsOverlayState = () => ({
+      pressureTestEnabled: isPressureTestEnabled,
       musicEnabled: audio.isMusicEnabled(),
       fpsEnabled: isFpsVisible,
       impactEffectsEnabled: isImpactEffectsEnabled,
@@ -589,6 +594,12 @@ export class GameController {
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
       state: getSettingsOverlayState(),
+      onPressureTestToggle: (enabled) => {
+        audio.playUiClick({ high: enabled })
+        isPressureTestEnabled = enabled
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
       onMusicToggle: (enabled) => {
         audio.playUiClick({ high: enabled })
         audio.setMusicEnabled(enabled)
@@ -643,7 +654,7 @@ export class GameController {
       },
     })
     const fpsText = new PIXI.Text({
-      text: 'FPS 0',
+      text: '帧率 0',
       style: {
         fill: 0x7cff72,
         fontFamily: 'IBM Plex Mono, monospace',
@@ -703,7 +714,7 @@ export class GameController {
       fpsSampleElapsed += deltaSeconds
       fpsFrameCount += 1
       if (fpsSampleElapsed >= 0.2) {
-        fpsText.text = `FPS ${Math.round(fpsFrameCount / fpsSampleElapsed)}`
+        fpsText.text = `帧率 ${Math.round(fpsFrameCount / fpsSampleElapsed)}`
         fpsSampleElapsed = 0
         fpsFrameCount = 0
       }

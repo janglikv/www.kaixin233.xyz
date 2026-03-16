@@ -32,6 +32,11 @@ export const saveGameSettings = (settings) => {
 
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+    window.dispatchEvent(
+      new CustomEvent('game-settings-changed', {
+        detail: settings,
+      }),
+    )
   } catch {
     // Ignore write failures and keep the game playable.
   }

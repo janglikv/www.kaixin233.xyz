@@ -105,7 +105,7 @@ const createToggleRow = ({ x, y, label, value, onToggle }) => {
 
   const update = (nextValue) => {
     currentValue = nextValue
-    valueText.text = currentValue ? 'ON' : 'OFF'
+    valueText.text = currentValue ? '已开启' : '已关闭'
     buttonLabel.text = currentValue ? '关闭' : '开启'
   }
 
@@ -191,6 +191,7 @@ export const createSettingsOverlay = ({
   width,
   height,
   state,
+  onPressureTestToggle,
   onMusicToggle,
   onFpsToggle,
   onImpactEffectsToggle,
@@ -243,7 +244,7 @@ export const createSettingsOverlay = ({
   container.addChild(title)
 
   const subtitle = new PIXI.Text({
-    text: '音频、属性和调试入口会保存在本机',
+    text: '场景、音频、属性和调试入口会保存在本机',
     style: {
       fill: 0x8dbdff,
       fontFamily: 'IBM Plex Mono, monospace',
@@ -254,30 +255,37 @@ export const createSettingsOverlay = ({
   subtitle.position.set(PANEL_PADDING, 86)
   container.addChild(subtitle)
 
-  const musicRow = createToggleRow({
+  const pressureTestRow = createToggleRow({
     x: PANEL_PADDING,
     y: ROW_START_Y,
+    label: '压力测试场景',
+    value: state.pressureTestEnabled,
+    onToggle: onPressureTestToggle,
+  })
+  const musicRow = createToggleRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y + ROW_GAP,
     label: '音乐',
     value: state.musicEnabled,
     onToggle: onMusicToggle,
   })
   const fpsRow = createToggleRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP,
-    label: 'FPS',
+    y: ROW_START_Y + ROW_GAP * 2,
+    label: '帧率',
     value: state.fpsEnabled,
     onToggle: onFpsToggle,
   })
   const impactEffectsRow = createToggleRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 2,
+    y: ROW_START_Y + ROW_GAP * 3,
     label: '爆炸效果',
     value: state.impactEffectsEnabled,
     onToggle: onImpactEffectsToggle,
   })
   const attackPowerRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 3,
+    y: ROW_START_Y + ROW_GAP * 4,
     label: '攻击力',
     value: state.attackPower,
     formatValue: (nextValue) => `${nextValue}`,
@@ -285,7 +293,7 @@ export const createSettingsOverlay = ({
   })
   const attackSpeedRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 4,
+    y: ROW_START_Y + ROW_GAP * 5,
     label: '攻速',
     value: state.attackSpeed,
     formatValue: (nextValue) => `${nextValue.toFixed(1)}/s`,
@@ -293,7 +301,7 @@ export const createSettingsOverlay = ({
   })
   const critChanceRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 5,
+    y: ROW_START_Y + ROW_GAP * 6,
     label: '暴击',
     value: state.critChance,
     formatValue: (nextValue) => `${(nextValue * 100).toFixed(0)}%`,
@@ -301,7 +309,7 @@ export const createSettingsOverlay = ({
   })
   const exhaustRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 6,
+    y: ROW_START_Y + ROW_GAP * 7,
     label: '尾焰',
     buttonLabel: '切换',
     value: state.exhaustName,
@@ -309,7 +317,7 @@ export const createSettingsOverlay = ({
   })
   const catalogRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 7,
+    y: ROW_START_Y + ROW_GAP * 8,
     label: '资料库',
     buttonLabel: '打开',
     value: '查看飞船资料',
@@ -323,6 +331,7 @@ export const createSettingsOverlay = ({
   catalogRow.update('查看飞船资料')
 
   ;[
+    pressureTestRow.container,
     musicRow.container,
     fpsRow.container,
     impactEffectsRow.container,
@@ -353,6 +362,7 @@ export const createSettingsOverlay = ({
       return container.visible
     },
     update(nextState) {
+      pressureTestRow.update(nextState.pressureTestEnabled)
       musicRow.update(nextState.musicEnabled)
       fpsRow.update(nextState.fpsEnabled)
       impactEffectsRow.update(nextState.impactEffectsEnabled)
