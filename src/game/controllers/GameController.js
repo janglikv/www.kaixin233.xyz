@@ -10,6 +10,7 @@ import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
 import { createPlayerHealthBar } from '../renderers/createPlayerHealthBar'
 import { createSettingsButton } from '../renderers/createSettingsButton'
+import { createShip } from '../renderers/createShip'
 import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
 import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
@@ -75,10 +76,37 @@ const normalizeGameSettings = (settings) => ({
   exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
 })
 
-const createEnemyFormation = ({ parent }) => {
+const createEnemySpriteAsset = ({ PIXI, renderer, shipTheme }) => {
+  const { ship, flameGlow, flameCore, flameInner } = createShip(shipTheme)
+
+  flameGlow.visible = false
+  flameCore.visible = false
+  flameInner.visible = false
+  ship.rotation = Math.PI
+  ship.scale.set(TEST_ENEMY_SCALE)
+
+  const bounds = ship.getLocalBounds()
+  ship.position.set(-bounds.x, -bounds.y)
+
+  const wrapper = new PIXI.Container()
+  wrapper.addChild(ship)
+
+  return {
+    texture: renderer.generateTexture(wrapper),
+    anchorX: -bounds.x / bounds.width,
+    anchorY: -bounds.y / bounds.height,
+  }
+}
+
+const createEnemyFormation = ({ PIXI, renderer, parent }) => {
   const enemies = []
   const activeHitboxes = []
   const enemyCatalogEntry = getEnemyCatalogEntryByPluginIndex(TEST_ENEMY_THEME_INDEX)
+  const enemySpriteAsset = createEnemySpriteAsset({
+    PIXI,
+    renderer,
+    shipTheme: enemyCatalogEntry.theme,
+  })
   const columnSpacing =
     TEST_ENEMY_COLUMNS > 1
       ? (LOGICAL_WIDTH - TEST_ENEMY_SIDE_PADDING * 2) / (TEST_ENEMY_COLUMNS - 1)
@@ -89,7 +117,7 @@ const createEnemyFormation = ({ parent }) => {
   const recycleEnemy = (enemy, steps = 1) => {
     enemy.health = TEST_ENEMY_HEALTH
     enemy.y -= recycleSpan * steps
-    enemy.scene.shipGroup.visible = true
+    enemy.sprite.visible = true
     enemy.hitbox.left = enemy.x - 24
     enemy.hitbox.right = enemy.x + 24
     enemy.hitbox.top = enemy.y - 30
@@ -106,17 +134,11 @@ const createEnemyFormation = ({ parent }) => {
         rowIndex * TEST_ENEMY_GAP_Y +
         (columnIndex % 2 === 0 ? 0 : TEST_ENEMY_STAGGER_Y)
       const enemyId = rowIndex * TEST_ENEMY_COLUMNS + columnIndex
-      const scene = createShipScene({
-        x,
-        y,
-        shipScale: TEST_ENEMY_SCALE,
-        shipRotation: Math.PI,
-        shipTheme: enemyCatalogEntry.theme,
-        showFlame: false,
-        cacheAsTexture: true,
-      })
+      const sprite = new PIXI.Sprite(enemySpriteAsset.texture)
+      sprite.anchor.set(enemySpriteAsset.anchorX, enemySpriteAsset.anchorY)
+      sprite.position.set(x, y)
 
-      parent.addChild(scene.shipGroup)
+      parent.addChild(sprite)
       const hitbox = {
         left: x - 24,
         right: x + 24,
@@ -133,7 +155,7 @@ const createEnemyFormation = ({ parent }) => {
         x,
         y,
         columnIndex,
-        scene,
+        sprite,
         hitbox,
       }
       enemies.push(enemy)
@@ -166,7 +188,7 @@ const createEnemyFormation = ({ parent }) => {
       const alive = enemy.health > 0
       const died = previousHealth > 0 && !alive
       if (died) {
-        enemy.scene.shipGroup.visible = false
+        enemy.sprite.visible = false
       }
 
       const hitResult = {
@@ -174,13 +196,13 @@ const createEnemyFormation = ({ parent }) => {
         alive,
         died,
         health: enemy.health,
-        x: enemy.scene.shipX,
-        y: enemy.scene.shipY + 8,
+        x: enemy.x,
+        y: enemy.y + 8,
       }
 
       if (died) {
         recycleEnemy(enemy)
-        enemy.scene.setPosition(enemy.x, enemy.y)
+        enemy.sprite.position.set(enemy.x, enemy.y)
         enemy.hitbox.health = enemy.health
       }
 
@@ -192,7 +214,7 @@ const createEnemyFormation = ({ parent }) => {
         if (enemy.y > bottomLimit) {
           recycleEnemy(enemy)
         }
-        enemy.scene.setPosition(enemy.x, enemy.y)
+        enemy.sprite.position.set(enemy.x, enemy.y)
         enemy.hitbox.left = enemy.x - 24
         enemy.hitbox.right = enemy.x + 24
         enemy.hitbox.top = enemy.y - 30
@@ -202,7 +224,9 @@ const createEnemyFormation = ({ parent }) => {
         enemy.hitbox.health = enemy.health
       })
     },
-    destroy() {},
+    destroy() {
+      enemySpriteAsset.texture.destroy(true)
+    },
   }
 }
 
@@ -297,6 +321,8 @@ export class GameController {
       shipScale: SHIP_SCALE,
     })
     const enemyFormation = createEnemyFormation({
+      PIXI,
+      renderer: app.renderer,
       parent: worldLayer,
     })
     const impactEffectSystem = createImpactEffectSystem(worldLayer)
