@@ -2,41 +2,70 @@ import * as PIXI from 'pixi.js'
 
 const ENEMY_BULLET_SPEED = 210
 
+const createSharedEnemyBulletAsset = (renderer) => {
+  const graphic = new PIXI.Graphics()
+  graphic
+    .circle(0, 0, 6)
+    .fill({ color: 0xff243d, alpha: 0.96 })
+    .circle(0, 0, 3)
+    .fill({ color: 0xff5b6f, alpha: 0.42 })
+    .circle(0, 0, 10)
+    .fill({ color: 0x7a0014, alpha: 0.24 })
+
+  const bounds = graphic.getLocalBounds()
+  graphic.position.set(-bounds.x, -bounds.y)
+
+  const wrapper = new PIXI.Container()
+  wrapper.addChild(graphic)
+
+  return {
+    texture: renderer.generateTexture(wrapper),
+    anchorX: -bounds.x / bounds.width,
+    anchorY: -bounds.y / bounds.height,
+  }
+}
+
 export const createEnemyBulletSystem = (parent, options = {}) => {
   const layer = new PIXI.Container()
   const bullets = []
+  const pool = []
   const cooldowns = new Map()
   const onHit = options.onHit ?? (() => {})
   const onFire = options.onFire ?? (() => {})
+  const asset = createSharedEnemyBulletAsset(options.renderer)
 
   parent.addChild(layer)
 
-  const spawnBullet = (x, y) => {
-    const bullet = new PIXI.Graphics()
-    bullet
-      .circle(0, 0, 6)
-      .fill({ color: 0xff243d, alpha: 0.96 })
-      .circle(0, 0, 3)
-      .fill({ color: 0xff5b6f, alpha: 0.42 })
-      .circle(0, 0, 10)
-      .fill({ color: 0x7a0014, alpha: 0.24 })
-    bullet.blendMode = 'add'
-    bullet.position.set(x, y)
-    layer.addChild(bullet)
-
-    bullets.push({
-      display: bullet,
-      x,
-      y,
+  const acquireBullet = () => {
+    const bullet = pool.pop() ?? {
+      display: new PIXI.Sprite(asset.texture),
+      x: 0,
+      y: 0,
       speed: ENEMY_BULLET_SPEED,
-    })
+    }
+
+    bullet.display.anchor.set(asset.anchorX, asset.anchorY)
+    bullet.display.blendMode = 'add'
+    bullet.display.visible = true
+    if (!bullet.display.parent) {
+      layer.addChild(bullet.display)
+    }
+    return bullet
   }
 
-  const removeBullet = (index) => {
+  const spawnBullet = (x, y) => {
+    const bullet = acquireBullet()
+    bullet.x = x
+    bullet.y = y
+    bullet.display.position.set(x, y)
+    bullets.push(bullet)
+  }
+
+  const releaseBullet = (index) => {
     const bullet = bullets[index]
-    layer.removeChild(bullet.display)
-    bullet.display.destroy()
+    bullet.display.visible = false
     bullets.splice(index, 1)
+    pool.push(bullet)
   }
 
   return {
@@ -75,18 +104,20 @@ export const createEnemyBulletSystem = (parent, options = {}) => {
           bullet.y <= target.bottom
         ) {
           onHit({ x: bullet.x, y: bullet.y })
-          removeBullet(index)
+          releaseBullet(index)
           continue
         }
 
         if (bullet.y >= maxY) {
-          removeBullet(index)
+          releaseBullet(index)
         }
       }
     },
     destroy() {
+      asset.texture.destroy(true)
       layer.destroy({ children: true })
       bullets.length = 0
+      pool.length = 0
       cooldowns.clear()
     },
   }

@@ -55,6 +55,7 @@ const PLAYER_STATS = {
 const GAME_SETTINGS_DEFAULTS = {
   musicEnabled: true,
   fpsEnabled: true,
+  impactEffectsEnabled: true,
   attackPower: PLAYER_STATS.attackPower,
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
@@ -70,6 +71,7 @@ const clampExhaustIndex = (value) =>
 const normalizeGameSettings = (settings) => ({
   musicEnabled: Boolean(settings.musicEnabled),
   fpsEnabled: settings.fpsEnabled !== false,
+  impactEffectsEnabled: settings.impactEffectsEnabled !== false,
   attackPower: clampAttackPower(settings.attackPower),
   attackSpeed: clampAttackSpeed(settings.attackSpeed),
   critChance: clampCritChance(settings.critChance),
@@ -380,7 +382,7 @@ export class GameController {
       shipScene.shipGroup.visible = false
       audio.playExplosion({ large: true })
       audio.playGameOver()
-      impactEffectSystem.spawn(shipScene.shipX, shipScene.shipY, {
+      spawnImpact(shipScene.shipX, shipScene.shipY, {
         scale: 3.2,
         flashOuterColor: 0xff4c39,
         flashInnerColor: 0xffd2a6,
@@ -389,6 +391,7 @@ export class GameController {
     }
 
     const enemyBulletSystem = createEnemyBulletSystem(worldLayer, {
+      renderer: app.renderer,
       onFire: () => {
         audio.playEnemyShot()
       },
@@ -396,7 +399,7 @@ export class GameController {
         playerHealth.current = Math.max(0, playerHealth.current - ENEMY_BULLET_DAMAGE)
         playerHealthBar.update(playerHealth.current, playerHealth.max)
         audio.playHit()
-        impactEffectSystem.spawn(x, y, { scale: 0.5 })
+        spawnImpact(x, y, { scale: 0.5 })
         if (playerHealth.current <= 0) {
           triggerGameOver()
         }
@@ -414,10 +417,10 @@ export class GameController {
           playerStats.attackPower * (isCrit ? 2 : 1),
         )
         audio.playHit({ crit: isCrit })
-        impactEffectSystem.spawn(x, y, { scale: isCrit ? 0.56 : 0.34 })
+        spawnImpact(x, y, { scale: isCrit ? 0.56 : 0.34 })
         if (damagedEnemy?.died) {
           audio.playExplosion({ large: true })
-          impactEffectSystem.spawn(damagedEnemy.x, damagedEnemy.y, {
+          spawnImpact(damagedEnemy.x, damagedEnemy.y, {
             scale: 2.7,
             flashOuterColor: 0xff5a36,
             flashInnerColor: 0xffd0a8,
@@ -428,6 +431,7 @@ export class GameController {
       },
     })
     const bulletSystem = createBulletSystem(worldLayer, {
+      renderer: app.renderer,
       onFire: () => {
         audio.playPlayerShot()
       },
@@ -437,12 +441,12 @@ export class GameController {
         const damagedEnemy = enemyFormation.applyDamage(target.id, damage)
 
         audio.playHit({ crit: isCrit })
-        impactEffectSystem.spawn(x, y, {
+        spawnImpact(x, y, {
           scale: isCrit ? 0.62 : 0.28 + damage / 260,
         })
         if (damagedEnemy?.died) {
           audio.playExplosion({ large: true })
-          impactEffectSystem.spawn(damagedEnemy.x, damagedEnemy.y, {
+          spawnImpact(damagedEnemy.x, damagedEnemy.y, {
             scale: 2.7,
             flashOuterColor: 0xff5a36,
             flashInnerColor: 0xffd0a8,
@@ -486,12 +490,14 @@ export class GameController {
     let isCatalogVisible = false
     let isSettingsVisible = false
     let isFpsVisible = persistedSettings.fpsEnabled
+    let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
     let currentExhaustIndex = persistedSettings.exhaustIndex
     const persistSettings = () => {
       saveGameSettings(
         normalizeGameSettings({
           musicEnabled: audio.isMusicEnabled(),
           fpsEnabled: isFpsVisible,
+          impactEffectsEnabled: isImpactEffectsEnabled,
           attackPower: playerStats.attackPower,
           attackSpeed: playerStats.attackSpeed,
           critChance: playerStats.critChance,
@@ -502,11 +508,16 @@ export class GameController {
     const getSettingsOverlayState = () => ({
       musicEnabled: audio.isMusicEnabled(),
       fpsEnabled: isFpsVisible,
+      impactEffectsEnabled: isImpactEffectsEnabled,
       attackPower: playerStats.attackPower,
       attackSpeed: playerStats.attackSpeed,
       critChance: playerStats.critChance,
       exhaustName: EXHAUST_PLUGINS[currentExhaustIndex]?.name ?? `#${currentExhaustIndex + 1}`,
     })
+    const spawnImpact = (x, y, options = {}) => {
+      if (!isImpactEffectsEnabled) return
+      impactEffectSystem.spawn(x, y, options)
+    }
     const unlockAudio = () => {
       audio.unlock()
     }
@@ -588,6 +599,12 @@ export class GameController {
         audio.playUiClick({ high: enabled })
         isFpsVisible = enabled
         fpsText.visible = isFpsVisible
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onImpactEffectsToggle: (enabled) => {
+        audio.playUiClick({ high: enabled })
+        isImpactEffectsEnabled = enabled
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
       },

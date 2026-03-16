@@ -193,6 +193,7 @@ export const createSettingsOverlay = ({
   state,
   onMusicToggle,
   onFpsToggle,
+  onImpactEffectsToggle,
   onAdjustStat,
   onFlameSwitch,
   onCatalogOpen,
@@ -267,9 +268,16 @@ export const createSettingsOverlay = ({
     value: state.fpsEnabled,
     onToggle: onFpsToggle,
   })
-  const attackPowerRow = createStepperRow({
+  const impactEffectsRow = createToggleRow({
     x: PANEL_PADDING,
     y: ROW_START_Y + ROW_GAP * 2,
+    label: '爆炸效果',
+    value: state.impactEffectsEnabled,
+    onToggle: onImpactEffectsToggle,
+  })
+  const attackPowerRow = createStepperRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y + ROW_GAP * 3,
     label: '攻击力',
     value: state.attackPower,
     formatValue: (nextValue) => `${nextValue}`,
@@ -277,7 +285,7 @@ export const createSettingsOverlay = ({
   })
   const attackSpeedRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 3,
+    y: ROW_START_Y + ROW_GAP * 4,
     label: '攻速',
     value: state.attackSpeed,
     formatValue: (nextValue) => `${nextValue.toFixed(1)}/s`,
@@ -285,7 +293,7 @@ export const createSettingsOverlay = ({
   })
   const critChanceRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 4,
+    y: ROW_START_Y + ROW_GAP * 5,
     label: '暴击',
     value: state.critChance,
     formatValue: (nextValue) => `${(nextValue * 100).toFixed(0)}%`,
@@ -293,7 +301,7 @@ export const createSettingsOverlay = ({
   })
   const exhaustRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 5,
+    y: ROW_START_Y + ROW_GAP * 6,
     label: '尾焰',
     buttonLabel: '切换',
     value: state.exhaustName,
@@ -301,7 +309,7 @@ export const createSettingsOverlay = ({
   })
   const catalogRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 6,
+    y: ROW_START_Y + ROW_GAP * 7,
     label: '资料库',
     buttonLabel: '打开',
     value: '查看飞船资料',
@@ -317,6 +325,7 @@ export const createSettingsOverlay = ({
   ;[
     musicRow.container,
     fpsRow.container,
+    impactEffectsRow.container,
     attackPowerRow.container,
     attackSpeedRow.container,
     critChanceRow.container,
@@ -346,6 +355,7 @@ export const createSettingsOverlay = ({
     update(nextState) {
       musicRow.update(nextState.musicEnabled)
       fpsRow.update(nextState.fpsEnabled)
+      impactEffectsRow.update(nextState.impactEffectsEnabled)
       attackPowerRow.update(nextState.attackPower)
       attackSpeedRow.update(nextState.attackSpeed)
       critChanceRow.update(nextState.critChance)
