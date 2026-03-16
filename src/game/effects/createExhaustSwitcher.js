@@ -24,6 +24,14 @@ export const createExhaustSwitcher = ({ PIXI, runtimeLayer, initialIndex = 0 }) 
     switchNext() {
       pluginIndex = getSafePluginIndex() + 1
       mountCurrent()
+      return getSafePluginIndex()
+    },
+    setIndex(nextIndex) {
+      pluginIndex = nextIndex
+      mountCurrent()
+    },
+    getIndex() {
+      return getSafePluginIndex()
     },
     reset() {
       mountCurrent()

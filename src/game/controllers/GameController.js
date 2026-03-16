@@ -8,13 +8,15 @@ import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
 import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
-import { createDebugPanel } from '../renderers/createDebugPanel'
 import { createPlayerHealthBar } from '../renderers/createPlayerHealthBar'
 import { createSettingsButton } from '../renderers/createSettingsButton'
 import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
 import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { createStatsPanel } from '../renderers/createStatsPanel'
+import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
+import { loadGameSettings } from '../utils/gameSettingsStorage'
+import { saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
 
@@ -77,7 +79,27 @@ const PLAYER_STATS = {
   attackSpeed: 11.5,
   critChance: 1,
 }
+const GAME_SETTINGS_DEFAULTS = {
+  musicEnabled: true,
+  attackPower: PLAYER_STATS.attackPower,
+  attackSpeed: PLAYER_STATS.attackSpeed,
+  critChance: PLAYER_STATS.critChance,
+  exhaustIndex: 0,
+}
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+const clampAttackPower = (value) => clamp(Math.round(value), 1, 999)
+const clampAttackSpeed = (value) => clamp(Math.round(value * 10) / 10, 1, 30)
+const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
+const clampExhaustIndex = (value) =>
+  clamp(Number.isFinite(value) ? Math.floor(value) : 0, 0, Math.max(0, EXHAUST_PLUGINS.length - 1))
+
+const normalizeGameSettings = (settings) => ({
+  musicEnabled: Boolean(settings.musicEnabled),
+  attackPower: clampAttackPower(settings.attackPower),
+  attackSpeed: clampAttackSpeed(settings.attackSpeed),
+  critChance: clampCritChance(settings.critChance),
+  exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
+})
 
 const WAVE_DEFINITIONS = [
   {
@@ -412,7 +434,14 @@ export class GameController {
 
     const gameLayer = new PIXI.Container()
     app.stage.addChild(gameLayer)
+    const persistedSettings = normalizeGameSettings(
+      loadGameSettings({
+        ...GAME_SETTINGS_DEFAULTS,
+        exhaustIndex: clampExhaustIndex(this.pluginIndex),
+      }),
+    )
     const audio = createSynthAudio()
+    audio.setMusicEnabled(persistedSettings.musicEnabled)
     audio.resetRunState()
     let layoutScale = 1
     let layoutOffsetX = 0
@@ -427,7 +456,11 @@ export class GameController {
     }
     let gameOver = false
     let gameOverFadeProgress = 0
-    const playerStats = { ...PLAYER_STATS }
+    const playerStats = {
+      attackPower: persistedSettings.attackPower,
+      attackSpeed: persistedSettings.attackSpeed,
+      critChance: persistedSettings.critChance,
+    }
     worldMask
       .roundRect(
         WORLD_INSET,
@@ -603,12 +636,30 @@ export class GameController {
       },
     })
     const keyboard = createKeyboardController()
-    let debugBounds = null
     let catalogBounds = null
     let settingsButtonBounds = null
     let settingsBounds = null
     let isCatalogVisible = false
     let isSettingsVisible = false
+    let currentExhaustIndex = persistedSettings.exhaustIndex
+    const persistSettings = () => {
+      saveGameSettings(
+        normalizeGameSettings({
+          musicEnabled: audio.isMusicEnabled(),
+          attackPower: playerStats.attackPower,
+          attackSpeed: playerStats.attackSpeed,
+          critChance: playerStats.critChance,
+          exhaustIndex: currentExhaustIndex,
+        }),
+      )
+    }
+    const getSettingsOverlayState = () => ({
+      musicEnabled: audio.isMusicEnabled(),
+      attackPower: playerStats.attackPower,
+      attackSpeed: playerStats.attackSpeed,
+      critChance: playerStats.critChance,
+      exhaustName: EXHAUST_PLUGINS[currentExhaustIndex]?.name ?? `#${currentExhaustIndex + 1}`,
+    })
     const unlockAudio = () => {
       audio.unlock()
     }
@@ -619,12 +670,6 @@ export class GameController {
         const logicalX = (event.clientX - rect.left - layoutOffsetX) / layoutScale
         const logicalY = (event.clientY - rect.top - layoutOffsetY) / layoutScale
 
-        const insideDebug =
-          debugBounds &&
-          logicalX >= debugBounds.left &&
-          logicalX <= debugBounds.right &&
-          logicalY >= debugBounds.top &&
-          logicalY <= debugBounds.bottom
         const insideCatalog =
           isCatalogVisible &&
           catalogBounds &&
@@ -646,13 +691,13 @@ export class GameController {
           logicalY >= settingsBounds.top &&
           logicalY <= settingsBounds.bottom
 
-        return !(insideDebug || insideCatalog || insideSettingsButton || insideSettings)
+        return !(insideCatalog || insideSettingsButton || insideSettings)
       },
     })
     const exhaustSwitcher = createExhaustSwitcher({
       PIXI,
       runtimeLayer: shipScene.runtimeLayer,
-      initialIndex: this.pluginIndex,
+      initialIndex: currentExhaustIndex,
     })
 
     const statsPanel = createStatsPanel({
@@ -685,11 +730,40 @@ export class GameController {
       y: 0,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
-      musicEnabled: audio.isMusicEnabled(),
+      state: getSettingsOverlayState(),
       onMusicToggle: (enabled) => {
         audio.playUiClick({ high: enabled })
         audio.setMusicEnabled(enabled)
-        settingsOverlay.update({ musicEnabled: enabled })
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onAdjustStat: (key, direction) => {
+        audio.playUiClick({ high: direction > 0 })
+        if (key === 'attackPower') {
+          playerStats.attackPower = clampAttackPower(playerStats.attackPower + direction)
+        }
+        if (key === 'attackSpeed') {
+          playerStats.attackSpeed = clampAttackSpeed(playerStats.attackSpeed + direction * 0.5)
+        }
+        if (key === 'critChance') {
+          playerStats.critChance = clampCritChance(playerStats.critChance + direction * 0.05)
+        }
+        statsPanel.update(playerStats)
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onFlameSwitch: () => {
+        audio.playUiClick({ high: true })
+        currentExhaustIndex = exhaustSwitcher.switchNext()
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onCatalogOpen: () => {
+        audio.playUiClick()
+        settingsOverlay.hide()
+        isSettingsVisible = false
+        catalogOverlay.toggle()
+        isCatalogVisible = catalogOverlay.isVisible()
       },
       onClose: () => {
         audio.playUiClick()
@@ -714,46 +788,9 @@ export class GameController {
         audio.playUiClick()
         settingsOverlay.toggle()
         isSettingsVisible = settingsOverlay.isVisible()
-        settingsOverlay.update({ musicEnabled: audio.isMusicEnabled() })
+        settingsOverlay.update(getSettingsOverlayState())
       },
     })
-    const debugPanel = createDebugPanel({
-      x: 14,
-      y: LOGICAL_HEIGHT - 212,
-      stats: playerStats,
-      onFlameSwitch: () => {
-        audio.playUiClick({ high: true })
-        exhaustSwitcher.switchNext()
-      },
-      onCatalogToggle: () => {
-        audio.playUiClick()
-        catalogOverlay.toggle()
-        isCatalogVisible = catalogOverlay.isVisible()
-      },
-      onChange: (index, direction) => {
-        audio.playUiClick({ high: direction > 0 })
-        if (index === 0) {
-          playerStats.attackPower = clamp(playerStats.attackPower + direction, 1, 999)
-        }
-        if (index === 1) {
-          playerStats.attackSpeed = clamp(
-            Math.round((playerStats.attackSpeed + direction * 0.5) * 10) / 10,
-            1,
-            30,
-          )
-        }
-        if (index === 2) {
-          playerStats.critChance = clamp(
-            Math.round((playerStats.critChance + direction * 0.05) * 100) / 100,
-            0,
-            1,
-          )
-        }
-        statsPanel.update(playerStats)
-        debugPanel.update(playerStats)
-      },
-    })
-    debugBounds = debugPanel.bounds
     catalogBounds = catalogOverlay.bounds
     settingsBounds = settingsOverlay.bounds
     settingsButtonBounds = settingsButton.bounds
@@ -766,7 +803,6 @@ export class GameController {
     gameLayer.addChild(worldMask)
     gameLayer.addChild(fpsText)
     gameLayer.addChild(settingsButton.container)
-    gameLayer.addChild(debugPanel.container)
     gameLayer.addChild(playerHealthBar.container)
     gameLayer.addChild(statsPanel.container)
     gameLayer.addChild(catalogOverlay.container)
