@@ -59,14 +59,23 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
 
   const getNextTarget = (missile, excludeId = null) => {
     const targets = missile.getTargets()
+    let bestTarget = null
+    let bestDistance = Infinity
 
-    return targets
-      .filter((target) => target.id !== excludeId && !missile.visitedTargetIds.has(target.id))
-      .sort((left, right) => {
-        const leftDistance = Math.hypot(left.x - missile.x, left.y - missile.y)
-        const rightDistance = Math.hypot(right.x - missile.x, right.y - missile.y)
-        return leftDistance - rightDistance
-      })[0]
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index]
+      if (target.id === excludeId || missile.visitedTargetIds.has(target.id)) {
+        continue
+      }
+
+      const distance = Math.hypot(target.x - missile.x, target.y - missile.y)
+      if (distance < bestDistance) {
+        bestDistance = distance
+        bestTarget = target
+      }
+    }
+
+    return bestTarget
   }
 
   const findCollisionTarget = (missile) => {
