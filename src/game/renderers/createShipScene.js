@@ -1,7 +1,15 @@
 import * as PIXI from 'pixi.js'
 import { createShip } from './createShip'
 
-export const createShipScene = ({ x, y, shipScale, shipRotation = 0, shipTheme }) => {
+export const createShipScene = ({
+  x,
+  y,
+  shipScale,
+  shipRotation = 0,
+  shipTheme,
+  showFlame = true,
+  cacheAsTexture = false,
+}) => {
   const shipGroup = new PIXI.Container()
   const runtimeLayer = new PIXI.Container()
   const { ship, flameGlow, flameCore, flameInner } = createShip(shipTheme)
@@ -11,6 +19,13 @@ export const createShipScene = ({ x, y, shipScale, shipRotation = 0, shipTheme }
   ship.position.set(shipX, shipY)
   ship.scale.set(shipScale)
   ship.rotation = shipRotation
+  flameGlow.visible = showFlame
+  flameCore.visible = showFlame
+  flameInner.visible = showFlame
+
+  if (cacheAsTexture && typeof ship.cacheAsTexture === 'function') {
+    ship.cacheAsTexture(true)
+  }
 
   shipGroup.addChild(runtimeLayer)
   shipGroup.addChild(ship)

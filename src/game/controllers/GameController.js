@@ -31,15 +31,16 @@ const SHIP_BOUND_HALF_WIDTH = 46 * SHIP_SCALE
 const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const WORLD_RADIUS = 0
-const TEST_ENEMY_COLUMNS = 24
-const TEST_ENEMY_ROWS = 14
+const TEST_ENEMY_COLUMNS = 72
+const TEST_ENEMY_ROWS = 40
 const TEST_ENEMY_THEME_INDEX = 3
 const TEST_ENEMY_SCALE = 0.11
 const TEST_ENEMY_HEALTH = 1
-const TEST_ENEMY_TOP_Y = -96
-const TEST_ENEMY_GAP_Y = 76
+const TEST_ENEMY_TOP_Y = -72
+const TEST_ENEMY_GAP_Y = 28
+const TEST_ENEMY_STAGGER_Y = TEST_ENEMY_GAP_Y * 0.5
 const TEST_ENEMY_SPEED_Y = 196
-const TEST_ENEMY_SIDE_PADDING = 36
+const TEST_ENEMY_SIDE_PADDING = 8
 const TEST_ENEMY_RECYCLE_BUFFER = 120
 const PLAYER_MAX_HEALTH = 10
 const ENEMY_ATTACK_SPEED = 1
@@ -52,6 +53,7 @@ const PLAYER_STATS = {
 }
 const GAME_SETTINGS_DEFAULTS = {
   musicEnabled: true,
+  fpsEnabled: true,
   attackPower: PLAYER_STATS.attackPower,
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
@@ -66,6 +68,7 @@ const clampExhaustIndex = (value) =>
 
 const normalizeGameSettings = (settings) => ({
   musicEnabled: Boolean(settings.musicEnabled),
+  fpsEnabled: settings.fpsEnabled !== false,
   attackPower: clampAttackPower(settings.attackPower),
   attackSpeed: clampAttackSpeed(settings.attackSpeed),
   critChance: clampCritChance(settings.critChance),
@@ -74,6 +77,7 @@ const normalizeGameSettings = (settings) => ({
 
 const createEnemyFormation = ({ parent }) => {
   const enemies = []
+  const activeHitboxes = []
   const enemyCatalogEntry = getEnemyCatalogEntryByPluginIndex(TEST_ENEMY_THEME_INDEX)
   const columnSpacing =
     TEST_ENEMY_COLUMNS > 1
@@ -81,18 +85,26 @@ const createEnemyFormation = ({ parent }) => {
       : 0
   const recycleSpan = TEST_ENEMY_ROWS * TEST_ENEMY_GAP_Y
   const bottomLimit = LOGICAL_HEIGHT + TEST_ENEMY_RECYCLE_BUFFER
-  const getAliveEnemies = () => enemies.filter((enemy) => enemy.health > 0)
 
   const recycleEnemy = (enemy, steps = 1) => {
     enemy.health = TEST_ENEMY_HEALTH
     enemy.y -= recycleSpan * steps
     enemy.scene.shipGroup.visible = true
+    enemy.hitbox.left = enemy.x - 24
+    enemy.hitbox.right = enemy.x + 24
+    enemy.hitbox.top = enemy.y - 30
+    enemy.hitbox.bottom = enemy.y + 28
+    enemy.hitbox.centerX = enemy.x
+    enemy.hitbox.centerY = enemy.y + 8
   }
 
   for (let rowIndex = 0; rowIndex < TEST_ENEMY_ROWS; rowIndex += 1) {
     for (let columnIndex = 0; columnIndex < TEST_ENEMY_COLUMNS; columnIndex += 1) {
       const x = TEST_ENEMY_SIDE_PADDING + columnIndex * columnSpacing
-      const y = TEST_ENEMY_TOP_Y - rowIndex * TEST_ENEMY_GAP_Y
+      const y =
+        TEST_ENEMY_TOP_Y -
+        rowIndex * TEST_ENEMY_GAP_Y +
+        (columnIndex % 2 === 0 ? 0 : TEST_ENEMY_STAGGER_Y)
       const enemyId = rowIndex * TEST_ENEMY_COLUMNS + columnIndex
       const scene = createShipScene({
         x,
@@ -100,31 +112,44 @@ const createEnemyFormation = ({ parent }) => {
         shipScale: TEST_ENEMY_SCALE,
         shipRotation: Math.PI,
         shipTheme: enemyCatalogEntry.theme,
+        showFlame: false,
+        cacheAsTexture: true,
       })
 
       parent.addChild(scene.shipGroup)
-      enemies.push({
+      const hitbox = {
+        left: x - 24,
+        right: x + 24,
+        top: y - 30,
+        bottom: y + 28,
+        id: enemyId,
+        centerX: x,
+        centerY: y + 8,
+        health: TEST_ENEMY_HEALTH,
+      }
+      const enemy = {
         id: enemyId,
         health: TEST_ENEMY_HEALTH,
         x,
         y,
+        columnIndex,
         scene,
-      })
+        hitbox,
+      }
+      enemies.push(enemy)
+      activeHitboxes.push(hitbox)
     }
   }
 
   return {
     getHitboxes() {
-      return getAliveEnemies().map((enemy) => ({
-        left: enemy.scene.shipX - 24,
-        right: enemy.scene.shipX + 24,
-        top: enemy.scene.shipY - 30,
-        bottom: enemy.scene.shipY + 28,
-        id: enemy.id,
-        centerX: enemy.scene.shipX,
-        centerY: enemy.scene.shipY + 8,
-        health: enemy.health,
-      }))
+      activeHitboxes.length = 0
+      enemies.forEach((enemy) => {
+        if (enemy.health > 0) {
+          activeHitboxes.push(enemy.hitbox)
+        }
+      })
+      return activeHitboxes
     },
     getShooters() {
       return []
@@ -137,6 +162,7 @@ const createEnemyFormation = ({ parent }) => {
 
       const previousHealth = enemy.health
       enemy.health = Math.max(0, enemy.health - damage)
+      enemy.hitbox.health = enemy.health
       const alive = enemy.health > 0
       const died = previousHealth > 0 && !alive
       if (died) {
@@ -155,6 +181,7 @@ const createEnemyFormation = ({ parent }) => {
       if (died) {
         recycleEnemy(enemy)
         enemy.scene.setPosition(enemy.x, enemy.y)
+        enemy.hitbox.health = enemy.health
       }
 
       return hitResult
@@ -166,6 +193,13 @@ const createEnemyFormation = ({ parent }) => {
           recycleEnemy(enemy)
         }
         enemy.scene.setPosition(enemy.x, enemy.y)
+        enemy.hitbox.left = enemy.x - 24
+        enemy.hitbox.right = enemy.x + 24
+        enemy.hitbox.top = enemy.y - 30
+        enemy.hitbox.bottom = enemy.y + 28
+        enemy.hitbox.centerX = enemy.x
+        enemy.hitbox.centerY = enemy.y + 8
+        enemy.hitbox.health = enemy.health
       })
     },
     destroy() {},
@@ -391,18 +425,25 @@ export class GameController {
         }
         if (!isCrit || !damagedEnemy) return
 
+        const followUpTarget =
+          enemyFormation
+            .getHitboxes()
+            .filter((enemy) => enemy.id !== damagedEnemy.id)
+            .map((enemy) => ({
+              id: enemy.id,
+              x: enemy.centerX,
+              y: enemy.centerY,
+            }))
+            .sort((left, right) => {
+              const leftDistance = Math.hypot(left.x - damagedEnemy.x, left.y - damagedEnemy.y)
+              const rightDistance = Math.hypot(right.x - damagedEnemy.x, right.y - damagedEnemy.y)
+              return leftDistance - rightDistance
+            })[0] ?? null
+
         homingBurstSystem.spawnPair({
           x: shipScene.shipX,
           y: shipScene.shipY - SHIP_MUZZLE_OFFSET,
-          target: {
-            id: damagedEnemy.id,
-            x: damagedEnemy.x,
-            y: damagedEnemy.y,
-          },
-          finalTarget: {
-            x: shipScene.shipX,
-            y: -120,
-          },
+          target: followUpTarget,
           getTargets: () =>
             enemyFormation.getHitboxes().map((enemy) => ({
               id: enemy.id,
@@ -418,11 +459,13 @@ export class GameController {
     let settingsBounds = null
     let isCatalogVisible = false
     let isSettingsVisible = false
+    let isFpsVisible = persistedSettings.fpsEnabled
     let currentExhaustIndex = persistedSettings.exhaustIndex
     const persistSettings = () => {
       saveGameSettings(
         normalizeGameSettings({
           musicEnabled: audio.isMusicEnabled(),
+          fpsEnabled: isFpsVisible,
           attackPower: playerStats.attackPower,
           attackSpeed: playerStats.attackSpeed,
           critChance: playerStats.critChance,
@@ -432,6 +475,7 @@ export class GameController {
     }
     const getSettingsOverlayState = () => ({
       musicEnabled: audio.isMusicEnabled(),
+      fpsEnabled: isFpsVisible,
       attackPower: playerStats.attackPower,
       attackSpeed: playerStats.attackSpeed,
       critChance: playerStats.critChance,
@@ -514,6 +558,13 @@ export class GameController {
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
       },
+      onFpsToggle: (enabled) => {
+        audio.playUiClick({ high: enabled })
+        isFpsVisible = enabled
+        fpsText.visible = isFpsVisible
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
       onAdjustStat: (key, direction) => {
         audio.playUiClick({ high: direction > 0 })
         if (key === 'attackPower') {
@@ -551,13 +602,14 @@ export class GameController {
     const fpsText = new PIXI.Text({
       text: 'FPS 0',
       style: {
-        fill: 0xe9f4ff,
+        fill: 0x7cff72,
         fontFamily: 'IBM Plex Mono, monospace',
         fontSize: 14,
         fontWeight: '700',
       },
     })
     fpsText.position.set(14, 18)
+    fpsText.visible = isFpsVisible
     const settingsButton = createSettingsButton({
       x: LOGICAL_WIDTH - 48,
       y: 14,
