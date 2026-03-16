@@ -1,10 +1,10 @@
 import * as PIXI from 'pixi.js'
+import { createSynthAudio } from '../audio/createSynthAudio'
 import { createBulletSystem } from '../effects/createBulletSystem'
 import { getEnemyCatalogEntryByPluginIndex } from '../data/shipCatalog'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
 import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
-import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
 import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
@@ -27,12 +27,44 @@ const SHIP_BOUND_HALF_WIDTH = 46 * SHIP_SCALE
 const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const WORLD_RADIUS = 0
-const ENEMY_ROWS = 0
-const ENEMY_SCALE = 0.3
-const ENEMY_TOP = 92
-const ENEMY_ROW_GAP = 72
-const ENEMY_SIDE_MARGIN = 72
-const ENEMY_MAX_HEALTH = 100
+const WAVE_ENEMY_COUNT = 12
+const WAVE_ENEMY_EXHAUST_INDEX = 3
+const WAVE_ENEMY_SCALE = 0.15
+const WAVE_ENEMY_HEALTH = 1
+const WAVE_MAX_COLUMNS = 9
+const WAVE_COLUMN_SPACING = 104
+const FIRST_WAVE_START_X = LOGICAL_WIDTH * 0.5
+const FIRST_WAVE_START_Y = -280
+const FIRST_WAVE_GAP = 84
+const FIRST_WAVE_SPEED_Y = 116
+const SECOND_WAVE_START_X = 200
+const SECOND_WAVE_START_Y = -120
+const SECOND_WAVE_GAP_X = 62
+const SECOND_WAVE_GAP_Y = 62
+const SECOND_WAVE_SPEED_X = 118
+const SECOND_WAVE_SPEED_Y = 118
+const SECOND_WAVE_DELAY = 2.2
+const THIRD_WAVE_START_X = LOGICAL_WIDTH - 200
+const THIRD_WAVE_START_Y = -120
+const THIRD_WAVE_GAP_X = 62
+const THIRD_WAVE_GAP_Y = 62
+const THIRD_WAVE_SPEED_X = -118
+const THIRD_WAVE_SPEED_Y = 118
+const THIRD_WAVE_DELAY = 4.4
+const FOURTH_WAVE_DELAY = 6.6
+const FOURTH_WAVE_GROUP_SIZE = 4
+const FOURTH_WAVE_LEFT_START_X = 320
+const FOURTH_WAVE_CENTER_START_X = LOGICAL_WIDTH * 0.5
+const FOURTH_WAVE_RIGHT_START_X = LOGICAL_WIDTH - 320
+const FOURTH_WAVE_LEFT_START_Y = -120
+const FOURTH_WAVE_CENTER_START_Y = -160
+const FOURTH_WAVE_RIGHT_START_Y = -120
+const FOURTH_WAVE_GAP = 62
+const FOURTH_WAVE_LEFT_SPEED_X = 88
+const FOURTH_WAVE_CENTER_SPEED_X = -8
+const FOURTH_WAVE_RIGHT_SPEED_X = -88
+const FOURTH_WAVE_SPEED_Y = 138
+const WAVE_SEQUENCE_DURATION = 15
 const PLAYER_MAX_HEALTH = 10
 const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
@@ -44,6 +76,25 @@ const PLAYER_STATS = {
   critChance: 1,
 }
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+
+const WAVE_DEFINITIONS = [
+  {
+    type: 'vertical',
+    startDelay: 0,
+  },
+  {
+    type: 'diagonal',
+    startDelay: SECOND_WAVE_DELAY,
+  },
+  {
+    type: 'reverseDiagonal',
+    startDelay: THIRD_WAVE_DELAY,
+  },
+  {
+    type: 'fanDive',
+    startDelay: FOURTH_WAVE_DELAY,
+  },
+]
 
 const createEnemyHealthBar = (PIXI) => {
   const container = new PIXI.Container()
@@ -86,44 +137,105 @@ const createEnemyHealthBar = (PIXI) => {
 
 const createEnemyFormation = ({ PIXI, parent }) => {
   const enemies = []
-  const enemyCount = EXHAUST_PLUGINS.length
-  const spacing =
-    enemyCount > 1 ? (LOGICAL_WIDTH - ENEMY_SIDE_MARGIN * 2) / (enemyCount - 1) : 0
-  const getAliveEnemies = () => enemies.filter((enemy) => enemy.health > 0)
+  const getAliveEnemies = () => enemies.filter((enemy) => enemy.active && enemy.health > 0)
 
-  for (let row = 0; row < ENEMY_ROWS; row += 1) {
-    for (let column = 0; column < enemyCount; column += 1) {
-      const enemyId = row * enemyCount + column
-      const exhaustIndex = column
-      const enemyCatalogEntry = getEnemyCatalogEntryByPluginIndex(exhaustIndex)
-      const scene = createShipScene({
-        x: ENEMY_SIDE_MARGIN + spacing * column,
-        y: ENEMY_TOP + ENEMY_ROW_GAP * row,
-        shipScale: ENEMY_SCALE,
-        shipRotation: Math.PI,
-        shipTheme: enemyCatalogEntry.theme,
-      })
-      const exhaustSwitcher = createExhaustSwitcher({
-        PIXI,
-        runtimeLayer: scene.runtimeLayer,
-        initialIndex: exhaustIndex,
-      })
-      const healthBar = createEnemyHealthBar(PIXI)
+  const getColumnRadius = (cycleIndex) => Math.min(cycleIndex + 1, 4)
 
-      parent.addChild(scene.shipGroup)
-      parent.addChild(healthBar.container)
-      enemies.push({
-        id: enemyId,
-        exhaustIndex,
-        health: ENEMY_MAX_HEALTH,
-        healthBarTimer: 0,
-        scene,
-        exhaustSwitcher,
-        healthBar,
-        pulseOffset: enemyId * 0.35,
-      })
-    }
+  const spawnEnemy = (enemy, cycleIndex) => {
+    enemy.spawnCycleIndex = cycleIndex
+    enemy.active = Math.abs(enemy.columnSlot) <= getColumnRadius(cycleIndex)
+    enemy.health = WAVE_ENEMY_HEALTH
+    enemy.healthBarTimer = 0
+    enemy.startX = enemy.baseStartX + enemy.columnSlot * WAVE_COLUMN_SPACING
+    enemy.startY = enemy.baseStartY
+    enemy.scene.shipGroup.visible = enemy.active
+    enemy.scene.setPosition(enemy.startX, enemy.startY)
+    enemy.exhaustEnabled = cycleIndex === 0
+    enemy.exhaustSwitcher.setEnabled(enemy.exhaustEnabled)
+    enemy.exhaustSwitcher.reset()
+    enemy.healthBar.update(1)
+    enemy.healthBar.setVisibility(0)
   }
+
+  const deactivateEnemy = (enemy) => {
+    enemy.active = false
+    enemy.healthBarTimer = 0
+    enemy.scene.shipGroup.visible = false
+    enemy.exhaustEnabled = false
+    enemy.exhaustSwitcher.setEnabled(false)
+    enemy.healthBar.setVisibility(0)
+  }
+
+  WAVE_DEFINITIONS.forEach((wave, waveIndex) => {
+    for (let columnIndex = 0; columnIndex < WAVE_MAX_COLUMNS; columnIndex += 1) {
+      const columnSlot = columnIndex - Math.floor(WAVE_MAX_COLUMNS / 2)
+
+      for (let index = 0; index < WAVE_ENEMY_COUNT; index += 1) {
+        const enemyCatalogEntry = getEnemyCatalogEntryByPluginIndex(WAVE_ENEMY_EXHAUST_INDEX)
+        const baseStartX =
+          wave.type === 'vertical'
+            ? FIRST_WAVE_START_X
+            : wave.type === 'diagonal'
+              ? SECOND_WAVE_START_X - SECOND_WAVE_GAP_X * index
+              : wave.type === 'reverseDiagonal'
+                ? THIRD_WAVE_START_X + THIRD_WAVE_GAP_X * index
+                : index < FOURTH_WAVE_GROUP_SIZE
+                  ? FOURTH_WAVE_LEFT_START_X - FOURTH_WAVE_GAP * index
+                  : index < FOURTH_WAVE_GROUP_SIZE * 2
+                    ? FOURTH_WAVE_CENTER_START_X
+                    : FOURTH_WAVE_RIGHT_START_X +
+                      FOURTH_WAVE_GAP * (index - FOURTH_WAVE_GROUP_SIZE * 2)
+        const baseStartY =
+          wave.type === 'vertical'
+            ? FIRST_WAVE_START_Y - FIRST_WAVE_GAP * index
+            : wave.type === 'diagonal'
+              ? SECOND_WAVE_START_Y - SECOND_WAVE_GAP_Y * index
+              : wave.type === 'reverseDiagonal'
+                ? THIRD_WAVE_START_Y - THIRD_WAVE_GAP_Y * index
+                : index < FOURTH_WAVE_GROUP_SIZE
+                  ? FOURTH_WAVE_LEFT_START_Y - FOURTH_WAVE_GAP * index
+                  : index < FOURTH_WAVE_GROUP_SIZE * 2
+                    ? FOURTH_WAVE_CENTER_START_Y - FOURTH_WAVE_GAP * (index - FOURTH_WAVE_GROUP_SIZE)
+                    : FOURTH_WAVE_RIGHT_START_Y - FOURTH_WAVE_GAP * (index - FOURTH_WAVE_GROUP_SIZE * 2)
+        const scene = createShipScene({
+          x: baseStartX + columnSlot * WAVE_COLUMN_SPACING,
+          y: baseStartY,
+          shipScale: WAVE_ENEMY_SCALE,
+          shipRotation: Math.PI,
+          shipTheme: enemyCatalogEntry.theme,
+        })
+        const exhaustSwitcher = createExhaustSwitcher({
+          PIXI,
+          runtimeLayer: scene.runtimeLayer,
+          initialIndex: WAVE_ENEMY_EXHAUST_INDEX,
+        })
+        const healthBar = createEnemyHealthBar(PIXI)
+        const enemyId = (waveIndex * WAVE_MAX_COLUMNS + columnIndex) * WAVE_ENEMY_COUNT + index
+
+        parent.addChild(scene.shipGroup)
+        parent.addChild(healthBar.container)
+        enemies.push({
+          id: enemyId,
+          active: false,
+          spawnCycleIndex: -1,
+          health: WAVE_ENEMY_HEALTH,
+          healthBarTimer: 0,
+          scene,
+          exhaustSwitcher,
+          exhaustEnabled: false,
+          healthBar,
+          pulseOffset: enemyId * 0.35,
+          waveType: wave.type,
+          startDelay: wave.startDelay,
+          columnSlot,
+          baseStartX,
+          baseStartY,
+          startX: baseStartX,
+          startY: baseStartY,
+        })
+      }
+    }
+  })
 
   return {
     getHitboxes() {
@@ -139,11 +251,7 @@ const createEnemyFormation = ({ PIXI, parent }) => {
       }))
     },
     getShooters() {
-      return getAliveEnemies().map((enemy) => ({
-        id: enemy.id,
-        x: enemy.scene.shipX,
-        y: enemy.scene.shipY + 26,
-      }))
+      return []
     },
     applyDamage(enemyId, damage) {
       const enemy = enemies.find((item) => item.id === enemyId)
@@ -155,9 +263,12 @@ const createEnemyFormation = ({ PIXI, parent }) => {
       enemy.health = Math.max(0, enemy.health - damage)
       const alive = enemy.health > 0
       const died = previousHealth > 0 && !alive
+      if (died) {
+        enemy.active = false
+      }
       enemy.scene.shipGroup.visible = alive
       enemy.healthBarTimer = alive ? ENEMY_HEALTH_BAR_SHOW_TIME : 0
-      enemy.healthBar.update(enemy.health / ENEMY_MAX_HEALTH)
+      enemy.healthBar.update(enemy.health / WAVE_ENEMY_HEALTH)
       enemy.healthBar.setVisibility(alive ? 1 : 0)
 
       return {
@@ -170,8 +281,62 @@ const createEnemyFormation = ({ PIXI, parent }) => {
       }
     },
     update(deltaSeconds, elapsedSeconds) {
-      getAliveEnemies().forEach((enemy) => {
+      enemies.forEach((enemy) => {
+        if (!enemy.active) {
+          const availableElapsed = elapsedSeconds - enemy.startDelay
+          if (availableElapsed < 0) {
+            return
+          }
+
+          const nextSpawnCycle = Math.floor(availableElapsed / WAVE_SEQUENCE_DURATION)
+          if (nextSpawnCycle > enemy.spawnCycleIndex) {
+            spawnEnemy(enemy, nextSpawnCycle)
+          }
+          return
+        }
+
+        const waveElapsed =
+          elapsedSeconds -
+          (enemy.startDelay + enemy.spawnCycleIndex * WAVE_SEQUENCE_DURATION)
+
         const pulse = 0.82 + Math.sin(elapsedSeconds * 10 + enemy.pulseOffset) * 0.18
+        const nextX =
+          enemy.waveType === 'vertical'
+            ? enemy.startX
+            : enemy.waveType === 'diagonal'
+              ? enemy.startX + SECOND_WAVE_SPEED_X * waveElapsed
+              : enemy.waveType === 'reverseDiagonal'
+                ? enemy.startX + THIRD_WAVE_SPEED_X * waveElapsed
+                : enemy.startX +
+                  (enemy.startX < FOURTH_WAVE_CENTER_START_X
+                    ? FOURTH_WAVE_LEFT_SPEED_X
+                    : enemy.startX > FOURTH_WAVE_CENTER_START_X
+                      ? FOURTH_WAVE_RIGHT_SPEED_X
+                      : FOURTH_WAVE_CENTER_SPEED_X) *
+                    waveElapsed
+        const nextY =
+          enemy.waveType === 'vertical'
+            ? enemy.startY + FIRST_WAVE_SPEED_Y * waveElapsed
+            : enemy.waveType === 'diagonal'
+              ? enemy.startY + SECOND_WAVE_SPEED_Y * waveElapsed
+              : enemy.waveType === 'reverseDiagonal'
+                ? enemy.startY + THIRD_WAVE_SPEED_Y * waveElapsed
+                : enemy.startY + FOURTH_WAVE_SPEED_Y * waveElapsed
+
+        enemy.scene.setPosition(
+          Math.max(-160, Math.min(LOGICAL_WIDTH + 160, nextX)),
+          Math.min(LOGICAL_HEIGHT + 160, nextY),
+        )
+
+        if (
+          enemy.scene.shipX < -170 ||
+          enemy.scene.shipX > LOGICAL_WIDTH + 170 ||
+          enemy.scene.shipY > LOGICAL_HEIGHT + 170
+        ) {
+          deactivateEnemy(enemy)
+          return
+        }
+
         enemy.healthBarTimer = Math.max(0, enemy.healthBarTimer - deltaSeconds)
         enemy.healthBar.container.position.set(enemy.scene.shipX, enemy.scene.shipY - 40)
         enemy.healthBar.refresh()
@@ -184,14 +349,16 @@ const createEnemyFormation = ({ PIXI, parent }) => {
         enemy.scene.flameCore.alpha = 0.46 + pulse * 0.14
         enemy.scene.flameInner.alpha = 0.2 + pulse * 0.1
 
-        enemy.exhaustSwitcher.update(deltaSeconds, elapsedSeconds, {
-          originX: enemy.scene.shipX,
-          originY: enemy.scene.shipY - SHIP_THRUST_DISTANCE,
-          directionX: 0,
-          directionY: 1,
-          pulse,
-          scale: EFFECT_SCALE,
-        })
+        if (enemy.exhaustEnabled) {
+          enemy.exhaustSwitcher.update(deltaSeconds, elapsedSeconds, {
+            originX: enemy.scene.shipX,
+            originY: enemy.scene.shipY - SHIP_THRUST_DISTANCE,
+            directionX: 0,
+            directionY: 1,
+            pulse,
+            scale: EFFECT_SCALE,
+          })
+        }
       })
     },
     destroy() {
@@ -243,6 +410,8 @@ export class GameController {
 
     const gameLayer = new PIXI.Container()
     app.stage.addChild(gameLayer)
+    const audio = createSynthAudio()
+    audio.resetRunState()
     let layoutScale = 1
     let layoutOffsetX = 0
     let layoutOffsetY = 0
@@ -337,6 +506,8 @@ export class GameController {
       if (gameOver) return
       gameOver = true
       shipScene.shipGroup.visible = false
+      audio.playExplosion({ large: true })
+      audio.playGameOver()
       impactEffectSystem.spawn(shipScene.shipX, shipScene.shipY, {
         scale: 3.2,
         flashOuterColor: 0xff4c39,
@@ -346,9 +517,13 @@ export class GameController {
     }
 
     const enemyBulletSystem = createEnemyBulletSystem(worldLayer, {
+      onFire: () => {
+        audio.playEnemyShot()
+      },
       onHit: ({ x, y }) => {
         playerHealth.current = Math.max(0, playerHealth.current - ENEMY_BULLET_DAMAGE)
         playerHealthBar.update(playerHealth.current, playerHealth.max)
+        audio.playHit()
         impactEffectSystem.spawn(x, y, { scale: 0.5 })
         if (playerHealth.current <= 0) {
           triggerGameOver()
@@ -357,14 +532,19 @@ export class GameController {
     })
     const homingBurstSystem = createHomingBurstSystem({
       parent: worldLayer,
+      onSpawn: () => {
+        audio.playHomingLaunch()
+      },
       onImpact: ({ x, y, target }) => {
         const isCrit = Math.random() < playerStats.critChance
         const damagedEnemy = enemyFormation.applyDamage(
           target.id,
           playerStats.attackPower * (isCrit ? 2 : 1),
         )
+        audio.playHit({ crit: isCrit })
         impactEffectSystem.spawn(x, y, { scale: isCrit ? 0.56 : 0.34 })
         if (damagedEnemy?.died) {
+          audio.playExplosion({ large: true })
           impactEffectSystem.spawn(damagedEnemy.x, damagedEnemy.y, {
             scale: 2.7,
             flashOuterColor: 0xff5a36,
@@ -376,15 +556,20 @@ export class GameController {
       },
     })
     const bulletSystem = createBulletSystem(worldLayer, {
+      onFire: () => {
+        audio.playPlayerShot()
+      },
       onHit: ({ x, y, target }) => {
         const isCrit = Math.random() < playerStats.critChance
         const damage = playerStats.attackPower * (isCrit ? 2 : 1)
         const damagedEnemy = enemyFormation.applyDamage(target.id, damage)
 
+        audio.playHit({ crit: isCrit })
         impactEffectSystem.spawn(x, y, {
           scale: isCrit ? 0.62 : 0.28 + damage / 260,
         })
         if (damagedEnemy?.died) {
+          audio.playExplosion({ large: true })
           impactEffectSystem.spawn(damagedEnemy.x, damagedEnemy.y, {
             scale: 2.7,
             flashOuterColor: 0xff5a36,
@@ -392,7 +577,7 @@ export class GameController {
             sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
           })
         }
-        if (!isCrit || !damagedEnemy?.alive) return
+        if (!isCrit || !damagedEnemy) return
 
         homingBurstSystem.spawnPair({
           x: shipScene.shipX,
@@ -419,6 +604,10 @@ export class GameController {
     let debugBounds = null
     let catalogBounds = null
     let isCatalogVisible = false
+    const unlockAudio = () => {
+      audio.unlock()
+    }
+    app.canvas.addEventListener('pointerdown', unlockAudio, { passive: true })
     const pointer = createPointerController(app.canvas, {
       shouldStart: (event) => {
         const rect = app.canvas.getBoundingClientRect()
@@ -468,6 +657,7 @@ export class GameController {
       height: LOGICAL_HEIGHT,
       entries: SHIP_CATALOG,
       onClose: () => {
+        audio.playUiClick()
         catalogOverlay.hide()
         isCatalogVisible = false
       },
@@ -477,13 +667,16 @@ export class GameController {
       y: LOGICAL_HEIGHT - 212,
       stats: playerStats,
       onFlameSwitch: () => {
+        audio.playUiClick({ high: true })
         exhaustSwitcher.switchNext()
       },
       onCatalogToggle: () => {
+        audio.playUiClick()
         catalogOverlay.toggle()
         isCatalogVisible = catalogOverlay.isVisible()
       },
       onChange: (index, direction) => {
+        audio.playUiClick({ high: direction > 0 })
         if (index === 0) {
           playerStats.attackPower = clamp(playerStats.attackPower + direction, 1, 999)
         }
@@ -632,6 +825,7 @@ export class GameController {
 
       app.renderer.off('resize', layout)
       app.ticker.remove(tick)
+      app.canvas.removeEventListener('pointerdown', unlockAudio)
 
       bulletSystem.destroy()
       enemyBulletSystem.destroy()
@@ -641,6 +835,7 @@ export class GameController {
       keyboard.destroy()
       pointer.destroy()
       exhaustSwitcher.destroy()
+      audio.destroy()
 
       if (initialized) {
         app.destroy(true, { children: true })

@@ -5,6 +5,7 @@ export const createBulletSystem = (parent, options = {}) => {
   const bullets = []
   let cooldown = 0
   const onHit = options.onHit ?? (() => {})
+  const onFire = options.onFire ?? (() => {})
 
   parent.addChild(layer)
 
@@ -46,6 +47,7 @@ export const createBulletSystem = (parent, options = {}) => {
       if (shouldFire && cooldown <= 0) {
         cooldown = fireInterval
         spawnBullet(originX, originY)
+        onFire({ x: originX, y: originY })
       }
 
       for (let index = bullets.length - 1; index >= 0; index -= 1) {

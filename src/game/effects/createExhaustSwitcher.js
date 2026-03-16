@@ -3,6 +3,7 @@ import { EXHAUST_PLUGINS } from './exhaustPlugins'
 export const createExhaustSwitcher = ({ PIXI, runtimeLayer, initialIndex = 0 }) => {
   let pluginIndex = initialIndex
   let pluginRuntime = null
+  let enabled = true
 
   const getSafePluginIndex = () =>
     ((pluginIndex % EXHAUST_PLUGINS.length) + EXHAUST_PLUGINS.length) %
@@ -10,6 +11,10 @@ export const createExhaustSwitcher = ({ PIXI, runtimeLayer, initialIndex = 0 }) 
 
   const mountCurrent = () => {
     pluginRuntime?.destroy()
+    if (!enabled) {
+      pluginRuntime = null
+      return
+    }
     pluginRuntime = EXHAUST_PLUGINS[getSafePluginIndex()].createRuntime(PIXI, runtimeLayer)
   }
 
@@ -18,6 +23,13 @@ export const createExhaustSwitcher = ({ PIXI, runtimeLayer, initialIndex = 0 }) 
   return {
     switchNext() {
       pluginIndex = getSafePluginIndex() + 1
+      mountCurrent()
+    },
+    reset() {
+      mountCurrent()
+    },
+    setEnabled(nextEnabled) {
+      enabled = nextEnabled
       mountCurrent()
     },
     update(deltaSeconds, elapsedSeconds, state) {

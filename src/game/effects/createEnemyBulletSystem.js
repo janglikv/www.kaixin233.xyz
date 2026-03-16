@@ -7,6 +7,7 @@ export const createEnemyBulletSystem = (parent, options = {}) => {
   const bullets = []
   const cooldowns = new Map()
   const onHit = options.onHit ?? (() => {})
+  const onFire = options.onFire ?? (() => {})
 
   parent.addChild(layer)
 
@@ -58,6 +59,7 @@ export const createEnemyBulletSystem = (parent, options = {}) => {
 
         cooldowns.set(shooter.id, fireInterval)
         spawnBullet(shooter.x, shooter.y)
+        onFire({ x: shooter.x, y: shooter.y, shooter })
       })
 
       for (let index = bullets.length - 1; index >= 0; index -= 1) {
