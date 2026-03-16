@@ -79,7 +79,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
     return missile.getTargets().find((target) => target.id === missile.target.id) ?? null
   }
 
-  const spawnMissile = ({ x, y, side, colorOffset, target, getTargets }) => {
+  const spawnMissile = ({ x, y, side, colorOffset, target, finalTarget, getTargets }) => {
     const sprite = createMissileGraphic()
     const trail = new PIXI.Graphics()
     const baseDirection = normalize(side * 0.85, -1)
@@ -99,6 +99,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
       velocityX: direction.x * MISSILE_SPEED,
       velocityY: direction.y * MISSILE_SPEED,
       target,
+      finalTarget,
       getTargets,
       trail,
       sprite,
@@ -113,11 +114,11 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
   }
 
   return {
-    spawnPair({ x, y, target, getTargets }) {
+    spawnPair({ x, y, target, finalTarget, getTargets }) {
       if (!target) return
       onSpawn?.({ x, y, target })
-      spawnMissile({ x, y, side: -1, colorOffset: 0, target, getTargets })
-      spawnMissile({ x, y, side: 1, colorOffset: 3, target, getTargets })
+      spawnMissile({ x, y, side: -1, colorOffset: 0, target, finalTarget, getTargets })
+      spawnMissile({ x, y, side: 1, colorOffset: 3, target, finalTarget, getTargets })
     },
     update(deltaSeconds) {
       for (let index = missiles.length - 1; index >= 0; index -= 1) {
@@ -133,10 +134,12 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
           }
         }
 
-        if (missile.target) {
+        const steeringTarget = missile.target ?? missile.finalTarget
+
+        if (steeringTarget) {
           const toTarget = normalize(
-            missile.target.x - missile.x,
-            missile.target.y - missile.y,
+            steeringTarget.x - missile.x,
+            steeringTarget.y - missile.y,
           )
           const desiredDirection = normalize(
             toTarget.x + missile.biasX * missile.biasStrength,
@@ -181,6 +184,12 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
               ? missile.target
               : null
 
+        const reachedFinalTarget =
+          !missile.target &&
+          missile.finalTarget &&
+          Math.hypot(missile.finalTarget.x - missile.x, missile.finalTarget.y - missile.y) <=
+            MISSILE_HIT_RADIUS
+
         if (collisionTarget) {
           const hitTarget = collisionTarget
           missile.visitedTargetIds.add(hitTarget.id)
@@ -205,6 +214,11 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
           }
 
           missile.target = getNextTarget(missile, hitTarget.id) ?? null
+        }
+
+        if (reachedFinalTarget) {
+          removeMissile(index)
+          continue
         }
 
         if (
