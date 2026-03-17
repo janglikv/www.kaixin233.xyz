@@ -41,3 +41,20 @@ export const saveGameSettings = (settings) => {
     // Ignore write failures and keep the game playable.
   }
 }
+
+export const clearGameSettings = () => {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return
+  }
+
+  try {
+    window.localStorage.removeItem(STORAGE_KEY)
+    window.dispatchEvent(
+      new CustomEvent('game-settings-changed', {
+        detail: {},
+      }),
+    )
+  } catch {
+    // Ignore write failures and keep the game playable.
+  }
+}

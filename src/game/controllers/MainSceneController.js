@@ -1,19 +1,75 @@
 import * as PIXI from 'pixi.js'
+import { SHIP_CATALOG } from '../data/shipCatalog'
 import { PLAYER_SHIP_THEME } from '../data/shipCatalog'
-import { createShipScene } from '../renderers/createShipScene'
+import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
+import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
+import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
 import { createSettingsButton } from '../renderers/createSettingsButton'
+import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
+import { createShip } from '../renderers/createShip'
+import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
-import { loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
+import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
+
+const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
+const SHIP_FRAME_ITEM_ID = 'ship-frame-1'
+const EXHAUST_0_ITEM_ID = 'exhaust-0'
+const EXHAUST_1_ITEM_ID = 'exhaust-1'
+const SHIP_DEFAULT_ITEM_NAME = '机体 #0'
+const SHIP_DEFAULT_ITEM_DESCRIPTION = '默认机体，维持当前基础机身外观，适合常规出击。'
+const SHIP_FRAME_ITEM_NAME = '机体 #1'
+const SHIP_FRAME_ITEM_DESCRIPTION = '标准机体组件，外观采用 #1 样式，可用于正常出击。'
+const SHIP_FRAME_THEME = SHIP_CATALOG[1]?.theme ?? PLAYER_SHIP_THEME
+const EXHAUST_0_PLUGIN = EXHAUST_PLUGINS[0]
+const EXHAUST_1_PLUGIN = EXHAUST_PLUGINS[1]
+const PREVIEW_THRUST_DISTANCE = 76 * 1.02
+const PREVIEW_EFFECT_SCALE = 0.9
+const PREVIEW_SHIP_ROTATION = 0.12
 
 const LOGICAL_WIDTH = 1280
 const LOGICAL_HEIGHT = 720
+const PLAYER_STATS = {
+  attackPower: 1,
+  attackSpeed: 11.5,
+  critChance: 1,
+}
 const GAME_SETTINGS_DEFAULTS = {
-  pressureTestEnabled: true,
+  gameStarted: false,
+  pressureTestEnabled: false,
+  equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
+  equippedExhaustItemId: EXHAUST_0_ITEM_ID,
+  musicEnabled: true,
+  fpsEnabled: true,
+  impactEffectsEnabled: true,
+  attackPower: PLAYER_STATS.attackPower,
+  attackSpeed: PLAYER_STATS.attackSpeed,
+  critChance: PLAYER_STATS.critChance,
 }
 
-const normalizeGameSettings = (settings) => ({
-  pressureTestEnabled: settings.pressureTestEnabled !== false,
-})
+const normalizeGameSettings = (settings) => {
+  const legacyEquippedItemId =
+    typeof settings.equippedItemId === 'string' ? settings.equippedItemId : null
+  const legacyItem = legacyEquippedItemId
+    ? INVENTORY_ITEMS?.find?.((item) => item.id === legacyEquippedItemId) ?? null
+    : null
+
+  return {
+    gameStarted: settings.gameStarted === true,
+    pressureTestEnabled: settings.pressureTestEnabled !== false,
+    equippedShipItemId:
+      typeof settings.equippedShipItemId === 'string'
+        ? settings.equippedShipItemId
+        : legacyItem?.kind === 'ship'
+          ? legacyItem.id
+          : SHIP_DEFAULT_ITEM_ID,
+    equippedExhaustItemId:
+      typeof settings.equippedExhaustItemId === 'string'
+        ? settings.equippedExhaustItemId
+        : legacyItem?.kind === 'exhaust'
+          ? legacyItem.id
+          : EXHAUST_0_ITEM_ID,
+  }
+}
 
 const createPanelFrame = ({ x, y, width, height, radius = 26 }) => {
   const container = new PIXI.Container()
@@ -63,6 +119,8 @@ const createSectionTitle = ({ text, x, y }) => {
 const createShipPreviewPanel = ({ x, y, width, height }) => {
   const container = new PIXI.Container()
   container.position.set(x, y)
+  let currentTheme = PLAYER_SHIP_THEME
+  let currentExhaustIndex = null
 
   const stageGlow = new PIXI.Graphics()
   stageGlow
@@ -80,110 +138,232 @@ const createShipPreviewPanel = ({ x, y, width, height }) => {
     .fill({ color: 0x9debff, alpha: 0.4 })
   container.addChild(floor)
 
-  const shipScene = createShipScene({
-    x: width * 0.5,
-    y: height * 0.44,
-    shipScale: 1.02,
-    shipRotation: 0.12,
-    shipTheme: PLAYER_SHIP_THEME,
-    showFlame: true,
-  })
-  container.addChild(shipScene.shipGroup)
+  let shipScene = null
+  let exhaustSwitcher = null
+
+  const buildShipScene = (theme) => {
+    currentTheme = theme
+    exhaustSwitcher?.destroy()
+    exhaustSwitcher = null
+    if (shipScene) {
+      container.removeChild(shipScene.shipGroup)
+      shipScene.shipGroup.destroy({ children: true })
+    }
+
+    shipScene = createShipScene({
+      x: width * 0.5,
+      y: height * 0.44,
+      shipScale: 1.02,
+      shipRotation: PREVIEW_SHIP_ROTATION,
+      shipTheme: currentTheme,
+      showFlame: false,
+    })
+    container.addChild(shipScene.shipGroup)
+    exhaustSwitcher = createExhaustSwitcher({
+      PIXI,
+      runtimeLayer: shipScene.runtimeLayer,
+      initialIndex: currentExhaustIndex ?? 0,
+    })
+    exhaustSwitcher.setEnabled(currentExhaustIndex !== null)
+  }
+
+  buildShipScene(currentTheme)
 
   return {
     container,
-    shipScene,
+    get shipScene() {
+      return shipScene
+    },
+    setTheme(nextTheme) {
+      if (nextTheme === currentTheme) return
+      buildShipScene(nextTheme)
+    },
+    setExhaustIndex(nextIndex) {
+      currentExhaustIndex = Number.isInteger(nextIndex) ? nextIndex : null
+      if (!exhaustSwitcher) return
+      if (currentExhaustIndex === null) {
+        exhaustSwitcher.setEnabled(false)
+        return
+      }
+      exhaustSwitcher.setEnabled(true)
+      exhaustSwitcher.setIndex(currentExhaustIndex)
+    },
+    update(deltaSeconds, elapsedSeconds, pulse) {
+      const directionX = Math.sin(PREVIEW_SHIP_ROTATION)
+      const directionY = -Math.cos(PREVIEW_SHIP_ROTATION)
+      exhaustSwitcher?.update(deltaSeconds, elapsedSeconds, {
+        originX: shipScene.shipX - directionX * PREVIEW_THRUST_DISTANCE,
+        originY: shipScene.shipY - directionY * PREVIEW_THRUST_DISTANCE,
+        directionX,
+        directionY,
+        pulse,
+        scale: PREVIEW_EFFECT_SCALE,
+      })
+    },
+    destroy() {
+      exhaustSwitcher?.destroy()
+      exhaustSwitcher = null
+    },
   }
 }
 
-const createInventorySlot = ({ x, y, size, label, color, quantity }) => {
-  const slot = new PIXI.Container()
-  slot.position.set(x, y)
+const createStartButton = ({ x, y, width, height, label, onTap }) => {
+  const container = new PIXI.Container()
+  container.position.set(x, y)
+  container.eventMode = 'static'
+  container.cursor = 'pointer'
+  let enabled = true
+
+  const shadow = new PIXI.Graphics()
+  shadow
+    .roundRect(0, 10, width, height, 26)
+    .fill({ color: 0x02111f, alpha: 0.42 })
+  container.addChild(shadow)
 
   const bg = new PIXI.Graphics()
-  bg
-    .roundRect(0, 0, size, size, 18)
-    .fill({ color: 0x08101d, alpha: 0.94 })
-    .stroke({ color: 0x2a4467, width: 2, alpha: 0.95 })
-  slot.addChild(bg)
-
-  const icon = new PIXI.Graphics()
-  icon
-    .circle(size * 0.5, 30, 12)
-    .fill({ color, alpha: 0.9 })
-    .roundRect(size * 0.5 - 16, 48, 32, 12, 6)
-    .fill({ color, alpha: 0.74 })
-  slot.addChild(icon)
-
-  const name = new PIXI.Text({
+  const gloss = new PIXI.Graphics()
+  const text = new PIXI.Text({
     text: label,
     style: {
-      fill: 0xdbeeff,
+      fill: 0xf8feff,
       fontFamily: '"Noto Sans SC", "Microsoft YaHei", sans-serif',
-      fontSize: 13,
-      fontWeight: '700',
-      align: 'center',
-      wordWrap: true,
-      wordWrapWidth: size - 12,
+      fontSize: 28,
+      fontWeight: '900',
+      letterSpacing: 4,
     },
   })
-  name.anchor.set(0.5, 0)
-  name.position.set(size * 0.5, 66)
-  slot.addChild(name)
 
-  const qty = new PIXI.Text({
-    text: `x${quantity}`,
-    style: {
-      fill: 0x87d8ff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 12,
-      fontWeight: '700',
-    },
+  const draw = (hovered = false) => {
+    bg
+      .clear()
+      .roundRect(0, 0, width, height, 26)
+      .fill({
+        color: hovered ? 0x1e8dff : 0x1467d9,
+        alpha: 0.98,
+      })
+      .stroke({
+        color: hovered ? 0xa8ebff : 0x7fcfff,
+        width: 3,
+        alpha: 0.95,
+      })
+
+    gloss
+      .clear()
+      .roundRect(2, 2, width - 4, height * 0.48, 24)
+      .fill({
+        color: 0xb8f4ff,
+        alpha: hovered ? 0.24 : 0.16,
+      })
+  }
+
+  draw(false)
+  text.anchor.set(0.5)
+  text.position.set(width * 0.5, height * 0.5)
+  container.addChild(bg)
+  container.addChild(gloss)
+  container.addChild(text)
+  container.on('pointertap', () => {
+    if (!enabled) return
+    onTap?.()
   })
-  qty.anchor.set(1, 1)
-  qty.position.set(size - 10, size - 8)
-  slot.addChild(qty)
+  container.on('pointerover', () => {
+    if (!enabled) return
+    draw(true)
+  })
+  container.on('pointerout', () => draw(false))
 
-  return slot
+  return {
+    container,
+    setEnabled(nextEnabled) {
+      draw(false)
+      container.cursor = nextEnabled ? 'pointer' : 'default'
+      container.alpha = nextEnabled ? 1 : 0.5
+      container.eventMode = nextEnabled ? 'static' : 'none'
+      enabled = nextEnabled
+    },
+  }
 }
 
-const createInventoryPanel = ({ x, y, width, height }) => {
-  const container = createPanelFrame({ x, y, width, height })
+const createShipFrameIcon = ({ size, theme }) => {
+  const icon = new PIXI.Container()
+  const shipAsset = createShip(theme)
+  const { ship, flameGlow, flameCore, flameInner } = shipAsset
 
-  container.addChild(
-    createSectionTitle({
-      text: '物品栏',
-      x: 28,
-      y: 24,
-    }),
+  flameGlow.visible = false
+  flameCore.visible = false
+  flameInner.visible = false
+
+  const shipBounds = ship.getLocalBounds()
+  const scale = (size * 0.68) / Math.max(shipBounds.width, shipBounds.height)
+  ship.scale.set(scale)
+
+  const scaledBounds = ship.getLocalBounds()
+  ship.position.set(
+    size * 0.5 - (scaledBounds.x + scaledBounds.width * 0.5),
+    size * 0.54 - (scaledBounds.y + scaledBounds.height * 0.5),
   )
+  icon.addChild(ship)
 
-  const items = [
-    ['修复组件', 0x6fffe9, 8],
-    ['等离子芯片', 0x5aa9ff, 14],
-    ['高能电池', 0xf7b267, 5],
-    ['护盾模块', 0xc77dff, 3],
-    ['追踪弹匣', 0xff6b6b, 12],
-    ['跃迁许可', 0xf4f1de, 1],
-  ]
-
-  items.forEach(([label, color, quantity], index) => {
-    container.addChild(
-      createInventorySlot({
-        x: 24 + index * 98,
-        y: 76,
-        size: 84,
-        label,
-        color,
-        quantity,
-      }),
-    )
-  })
-
-  return container
+  return {
+    container: icon,
+    update(equipped) {
+      icon.alpha = equipped ? 1 : 0.94
+    },
+  }
 }
 
-const createToggleButton = ({ x, y, width, height, label, onTap }) => {
+const createExhaustIcon = ({ size, pluginIndex }) => {
+  const container = new PIXI.Container()
+  const nozzle = new PIXI.Graphics()
+  const runtimeLayer = new PIXI.Container()
+  const scale = size / 196
+  const offsetY = 12 * (size / 196)
+  let elapsed = 0
+  let active = false
+
+  nozzle
+    .roundRect(
+      size * 0.5 - 18 * scale,
+      size * 0.2 + offsetY,
+      36 * scale,
+      24 * scale,
+      12 * scale,
+    )
+    .fill({ color: 0x0f2748, alpha: 0.96 })
+    .stroke({ color: 0x5f8bc7, width: 2 * scale, alpha: 0.94 })
+    .roundRect(size * 0.5 - 11 * scale, size * 0.24 + offsetY, 22 * scale, 14 * scale, 8 * scale)
+    .fill({ color: 0x1f7dff, alpha: 0.92 })
+  container.addChild(runtimeLayer)
+  container.addChild(nozzle)
+
+  const runtime = EXHAUST_PLUGINS[pluginIndex]?.createRuntime(PIXI, runtimeLayer) ?? null
+
+  return {
+    container,
+    update(equipped) {
+      active = equipped
+      container.alpha = equipped ? 1 : 0.94
+    },
+    tick(deltaSeconds) {
+      if (!runtime) return
+      elapsed += deltaSeconds
+      const pulse = (Math.sin(elapsed * 4.4) + 1) * 0.5
+      runtime.update(deltaSeconds, elapsed, {
+        originX: size * 0.5,
+        originY: size * 0.36 + offsetY,
+        directionX: 0,
+        directionY: -1,
+        pulse: active ? 0.78 + pulse * 0.22 : 0.46 + pulse * 0.12,
+        scale: Math.max(0.45, size / 196),
+      })
+    },
+    destroy() {
+      runtime?.destroy()
+    },
+  }
+}
+
+const createModalButton = ({ x, y, width, height, label, onTap, variant = 'primary' }) => {
   const container = new PIXI.Container()
   container.position.set(x, y)
   container.eventMode = 'static'
@@ -193,160 +373,425 @@ const createToggleButton = ({ x, y, width, height, label, onTap }) => {
   const text = new PIXI.Text({
     text: label,
     style: {
-      fill: 0xe9f4ff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 18,
-      fontWeight: '700',
+      fill: 0xf8feff,
+      fontFamily: '"Noto Sans SC", "Microsoft YaHei", sans-serif',
+      fontSize: 20,
+      fontWeight: '900',
+      letterSpacing: 2,
     },
   })
+  text.anchor.set(0.5)
+  text.position.set(width * 0.5, height * 0.5)
+
+  const palette =
+    variant === 'secondary'
+      ? {
+          idle: 0x2a3547,
+          hover: 0x354866,
+          stroke: 0x7f9cc2,
+          hoverStroke: 0xaed3ff,
+        }
+      : {
+          idle: 0x1467d9,
+          hover: 0x1e8dff,
+          stroke: 0x7fcfff,
+          hoverStroke: 0xa8ebff,
+        }
 
   const draw = (hovered = false) => {
     bg
       .clear()
-      .roundRect(0, 0, width, height, 12)
-      .fill({
-        color: hovered ? 0x15325f : 0x0a1836,
-        alpha: 0.94,
-      })
+      .roundRect(0, 0, width, height, 18)
+      .fill({ color: hovered ? palette.hover : palette.idle, alpha: 0.98 })
       .stroke({
-        color: hovered ? 0x7fcfff : 0x48638f,
+        color: hovered ? palette.hoverStroke : palette.stroke,
         width: 2,
-        alpha: 0.95,
+        alpha: 0.96,
       })
   }
 
   draw(false)
-  text.anchor.set(0.5)
-  text.position.set(width * 0.5, height * 0.5)
   container.addChild(bg)
   container.addChild(text)
-  container.on('pointertap', onTap)
+  container.on('pointertap', (event) => {
+    event.stopPropagation()
+    onTap?.()
+  })
   container.on('pointerover', () => draw(true))
   container.on('pointerout', () => draw(false))
 
   return {
     container,
-    update(nextLabel) {
+    setLabel(nextLabel) {
       text.text = nextLabel
     },
   }
 }
 
-const createMainSceneSettingsOverlay = ({ x, y, width, height, enabled, onToggle, onClose }) => {
+const createItemDetailModal = ({ width, height, onToggleEquip }) => {
   const container = new PIXI.Container()
-  container.position.set(x, y)
   container.visible = false
 
-  const bg = new PIXI.Graphics()
-  bg.rect(0, 0, width, height).fill({ color: 0x050a15, alpha: 0.96 })
-  container.addChild(bg)
+  const overlay = new PIXI.Graphics()
+  overlay
+    .rect(0, 0, width, height)
+    .fill({ color: 0x030711, alpha: 0.7 })
+  overlay.eventMode = 'static'
+  overlay.cursor = 'default'
+  overlay.on('pointertap', () => {
+    container.visible = false
+  })
+  container.addChild(overlay)
 
-  const panel = new PIXI.Graphics()
-  panel
-    .roundRect(width * 0.5 - 250, 120, 500, 240, 24)
-    .fill({ color: 0x081225, alpha: 0.96 })
-    .stroke({ color: 0x28426c, width: 2, alpha: 0.95 })
+  const panelWidth = 680
+  const panelHeight = 470
+  const panelX = (width - panelWidth) * 0.5
+  const panelY = (height - panelHeight) * 0.5
+  const panel = createPanelFrame({
+    x: panelX,
+    y: panelY,
+    width: panelWidth,
+    height: panelHeight,
+    radius: 30,
+  })
+  panel.eventMode = 'static'
+  panel.cursor = 'default'
+  panel.on('pointertap', (event) => {
+    event.stopPropagation()
+  })
   container.addChild(panel)
 
-  const title = new PIXI.Text({
-    text: '设置',
-    style: {
-      fill: 0xe9f4ff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 36,
-      fontWeight: '700',
-    },
+  const closeButton = new PIXI.Graphics()
+  closeButton
+    .roundRect(panelWidth - 58, 18, 40, 40, 12)
+    .fill({ color: 0x132745, alpha: 0.96 })
+    .stroke({ color: 0x5c86bc, width: 2, alpha: 0.96 })
+  closeButton.eventMode = 'static'
+  closeButton.cursor = 'pointer'
+  closeButton.on('pointertap', (event) => {
+    event.stopPropagation()
+    container.visible = false
   })
-  title.position.set(width * 0.5 - 214, 150)
-  container.addChild(title)
+  panel.addChild(closeButton)
 
-  const subtitle = new PIXI.Text({
-    text: '切换后会重新进入对应场景',
+  const closeText = new PIXI.Text({
+    text: '×',
     style: {
-      fill: 0x8dbdff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 14,
-    },
-  })
-  subtitle.position.set(width * 0.5 - 214, 198)
-  container.addChild(subtitle)
-
-  const label = new PIXI.Text({
-    text: '压力测试场景',
-    style: {
-      fill: 0xe9f4ff,
+      fill: 0xeaf6ff,
       fontFamily: 'IBM Plex Mono, monospace',
       fontSize: 24,
       fontWeight: '700',
     },
   })
-  label.position.set(width * 0.5 - 214, 256)
-  container.addChild(label)
+  closeText.anchor.set(0.5)
+  closeText.position.set(panelWidth - 38, 38)
+  panel.addChild(closeText)
 
-  const valueText = new PIXI.Text({
+  const previewFrame = new PIXI.Graphics()
+  previewFrame
+    .roundRect(34, 84, 196, 196, 26)
+    .fill({ color: 0x0c1830, alpha: 0.98 })
+    .stroke({ color: 0x4675b0, width: 2, alpha: 0.96 })
+  panel.addChild(previewFrame)
+
+  const iconHost = new PIXI.Container()
+  iconHost.position.set(34, 84)
+  panel.addChild(iconHost)
+
+  const titleText = new PIXI.Text({
     text: '',
     style: {
-      fill: 0xf5fbff,
+      fill: 0xffde7a,
+      fontFamily: '"Noto Sans SC", "Microsoft YaHei", sans-serif',
+      fontSize: 34,
+      fontWeight: '900',
+      letterSpacing: 1.2,
+    },
+  })
+  titleText.position.set(260, 92)
+  panel.addChild(titleText)
+
+  const statusText = new PIXI.Text({
+    text: '',
+    style: {
+      fill: 0x8cd8ff,
       fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 20,
+      fontSize: 16,
       fontWeight: '700',
+      letterSpacing: 1.2,
     },
   })
-  valueText.anchor.set(1, 0.5)
-  valueText.position.set(width * 0.5 + 118, 274)
-  container.addChild(valueText)
+  statusText.position.set(262, 142)
+  panel.addChild(statusText)
 
-  let currentValue = enabled
-  const toggleButton = createToggleButton({
-    x: width * 0.5 + 132,
-    y: 256,
-    width: 96,
-    height: 40,
-    label: '',
+  const descText = new PIXI.Text({
+    text: '',
+    style: {
+      fill: 0xd7e8ff,
+      fontFamily: '"Noto Sans SC", "Microsoft YaHei", sans-serif',
+      fontSize: 20,
+      lineHeight: 32,
+      wordWrap: true,
+      breakWords: true,
+      wordWrapWidth: 380,
+    },
+  })
+  descText.position.set(262, 186)
+  panel.addChild(descText)
+
+  const actionButton = createModalButton({
+    x: (panelWidth - 220) * 0.5,
+    y: panelHeight - 84,
+    width: 220,
+    height: 52,
+    label: '装备',
     onTap: () => {
-      currentValue = !currentValue
-      update(currentValue)
-      onToggle(currentValue)
+      if (!currentItem) return
+      onToggleEquip(currentItem.id)
+      container.visible = false
     },
   })
-  container.addChild(toggleButton.container)
+  panel.addChild(actionButton.container)
 
-  const closeButton = createToggleButton({
-    x: width * 0.5 - 48,
-    y: 324,
-    width: 96,
-    height: 40,
-    label: '关闭',
-    onTap: onClose,
-  })
-  container.addChild(closeButton.container)
-
-  const update = (nextEnabled) => {
-    currentValue = nextEnabled
-    valueText.text = currentValue ? '已开启' : '已关闭'
-    toggleButton.update(currentValue ? '关闭' : '开启')
-  }
-
-  update(enabled)
+  let currentItem = null
+  let currentIcon = null
 
   return {
     container,
-    bounds: {
-      left: x,
-      top: y,
-      right: x + width,
-      bottom: y + height,
-    },
-    toggle() {
-      container.visible = !container.visible
-    },
     hide() {
       container.visible = false
     },
-    isVisible() {
-      return container.visible
+    update(item, equippedState) {
+      currentItem = item
+      titleText.text = item.name
+      statusText.text = isItemEquipped(item, equippedState) ? '当前状态: 已装备' : '当前状态: 未装备'
+      descText.text = item.description
+      actionButton.setLabel(isItemEquipped(item, equippedState) ? '取消装备' : '装备')
+
+      if (currentIcon) {
+        iconHost.removeChild(currentIcon.container)
+        currentIcon.container.destroy({ children: true })
+      }
+      currentIcon = item.drawIcon({ size: 196 })
+      currentIcon.update?.(isItemEquipped(item, equippedState))
+      iconHost.addChild(currentIcon.container)
+      container.visible = true
     },
-    update,
+    tick(deltaSeconds) {
+      currentIcon?.tick?.(deltaSeconds)
+    },
+    destroy() {
+      currentIcon?.destroy?.()
+      currentIcon = null
+    },
+  }
+}
+
+const createInventorySlot = ({ x, y, size, equipped, drawIcon, onTap }) => {
+  const scale = size / 184
+  const slot = new PIXI.Container()
+  slot.position.set(x, y)
+  slot.eventMode = 'static'
+  slot.cursor = 'pointer'
+
+  const bg = new PIXI.Graphics()
+  const icon = drawIcon({ size })
+  const badge = new PIXI.Graphics()
+
+  const draw = (hovered = false, isEquipped = equipped) => {
+    bg
+      .clear()
+      .roundRect(0, 0, size, size, 22 * scale)
+      .fill({
+        color: isEquipped ? 0x2f2410 : 0x101318,
+        alpha: 0.96,
+      })
+      .stroke({
+        color: isEquipped ? 0xffd86c : hovered ? 0x7fcfff : 0x2a4467,
+        width: isEquipped ? 3 : 2,
+        alpha: 0.95,
+      })
+
+    icon.update?.(isEquipped || hovered)
+
+    badge.visible = isEquipped
+    badge
+      .clear()
+      .roundRect(size - 50 * scale, 8 * scale, 40 * scale, 40 * scale, 10 * scale)
+      .fill({ color: 0xffd86c, alpha: 0.98 })
+      .stroke({ color: 0xffefb0, width: 2 * scale, alpha: 0.95 })
+      .moveTo(size - 40 * scale, 28 * scale)
+      .lineTo(size - 32 * scale, 36 * scale)
+      .lineTo(size - 18 * scale, 18 * scale)
+      .stroke({ color: 0x3a2400, width: 3 * scale, alpha: 1, cap: 'round', join: 'round' })
+  }
+
+  draw(false, equipped)
+  slot.addChild(bg)
+  slot.addChild(icon.container)
+  slot.addChild(badge)
+  slot.on('pointertap', () => {
+    onTap?.()
+  })
+  slot.on('pointerover', () => {
+    draw(true, equipped)
+  })
+  slot.on('pointerout', () => {
+    draw(false, equipped)
+  })
+
+  return {
+    container: slot,
+    update(nextEquipped) {
+      equipped = nextEquipped
+      draw(false, equipped)
+    },
+    tick(deltaSeconds) {
+      icon.tick?.(deltaSeconds)
+    },
+    destroy() {
+      icon.destroy?.()
+    },
+  }
+}
+
+const getShipItemId = (serial) => {
+  if (serial === 0) return SHIP_DEFAULT_ITEM_ID
+  if (serial === 1) return SHIP_FRAME_ITEM_ID
+  return `ship-frame-${serial}`
+}
+
+const getExhaustItemId = (index) => {
+  if (index === 0) return EXHAUST_0_ITEM_ID
+  if (index === 1) return EXHAUST_1_ITEM_ID
+  return `exhaust-${index}`
+}
+
+const SHIP_ITEMS = SHIP_CATALOG.map((entry) => ({
+  id: getShipItemId(entry.serial),
+  kind: 'ship',
+  name: `机体 ${entry.code}`,
+  description:
+    entry.serial === 0
+      ? '默认机体，维持当前基础机身外观，适合常规出击。'
+      : `${entry.name} 风格机体，编号 ${entry.code}。`,
+  theme: entry.theme,
+  drawIcon: ({ size }) => {
+    return createShipFrameIcon({
+      size,
+      theme: entry.theme,
+    })
+  },
+}))
+
+const EXHAUST_ITEMS = EXHAUST_PLUGINS.map((plugin, index) => ({
+  id: getExhaustItemId(index),
+  kind: 'exhaust',
+  name: `尾焰 #${index}`,
+  description: `${plugin.name} / ${plugin.description}`,
+  pluginIndex: index,
+  drawIcon: ({ size }) => {
+    return createExhaustIcon({
+      size,
+      pluginIndex: index,
+    })
+  },
+}))
+
+const INVENTORY_ITEMS = [
+  ...SHIP_ITEMS,
+  ...EXHAUST_ITEMS,
+]
+
+const isItemEquipped = (item, equippedState) => {
+  if (item.kind === 'ship') return equippedState.shipItemId === item.id
+  if (item.kind === 'exhaust') return equippedState.exhaustItemId === item.id
+  return false
+}
+
+const toggleEquippedItem = (item, equippedState) => {
+  if (item.kind === 'ship') {
+    return {
+      ...equippedState,
+      shipItemId: equippedState.shipItemId === item.id ? null : item.id,
+    }
+  }
+  if (item.kind === 'exhaust') {
+    return {
+      ...equippedState,
+      exhaustItemId: equippedState.exhaustItemId === item.id ? null : item.id,
+    }
+  }
+  return equippedState
+}
+
+const canStartGame = (equippedState) =>
+  Boolean(equippedState.shipItemId) && Boolean(equippedState.exhaustItemId)
+
+const getPreviewShipTheme = (equippedState) => {
+  const shipItem = SHIP_ITEMS.find((item) => item.id === equippedState.shipItemId)
+  return shipItem?.theme ?? PLAYER_SHIP_THEME
+}
+
+const getPreviewExhaustIndex = (equippedState) => {
+  const exhaustItem = EXHAUST_ITEMS.find((item) => item.id === equippedState.exhaustItemId)
+  return Number.isInteger(exhaustItem?.pluginIndex) ? exhaustItem.pluginIndex : null
+}
+
+const createInventoryPanel = ({ x, y, width, height, equippedState, onSelectItem }) => {
+  const container = createPanelFrame({ x, y, width, height })
+  const slots = []
+  const slotSize = 94
+  const colGap = 14
+  const rowGap = 22
+  const columns = 6
+
+  container.addChild(
+    createSectionTitle({
+      text: '物品',
+      x: 28,
+      y: 12,
+    }),
+  )
+
+  INVENTORY_ITEMS.forEach((item, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    const slot = createInventorySlot({
+      x: 36 + column * (slotSize + colGap),
+      y: 64 + row * (slotSize + rowGap),
+      size: slotSize,
+      equipped: isItemEquipped(item, equippedState),
+      drawIcon: item.drawIcon,
+      onTap: () => {
+        onSelectItem(item)
+      },
+    })
+    slots.push({
+      id: item.id,
+      slot,
+    })
+    container.addChild(slot.container)
+  })
+
+  return {
+    container,
+    update(nextEquippedState) {
+      slots.forEach(({ id, slot }) => {
+        const item = INVENTORY_ITEMS.find((entry) => entry.id === id)
+        slot.update(item ? isItemEquipped(item, nextEquippedState) : false)
+      })
+    },
+    tick(deltaSeconds) {
+      slots.forEach(({ slot }) => {
+        slot.tick?.(deltaSeconds)
+      })
+    },
+    destroy() {
+      slots.forEach(({ slot }) => {
+        slot.destroy?.()
+      })
+    },
   }
 }
 
@@ -392,19 +837,38 @@ export class MainSceneController {
 
     const persistedSettings = normalizeGameSettings(loadGameSettings(GAME_SETTINGS_DEFAULTS))
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
+    let equippedState = {
+      shipItemId: persistedSettings.equippedShipItemId,
+      exhaustItemId: persistedSettings.equippedExhaustItemId,
+    }
     let layoutScale = 1
     let layoutOffsetX = 0
     let layoutOffsetY = 0
-    let settingsBounds = null
-    let settingsButtonBounds = null
-    let isSettingsVisible = false
     let animationTime = 0
+    let isCatalogVisible = false
+    let isSettingsVisible = false
+    let isMusicEnabled = persistedSettings.musicEnabled !== false
+    let isFpsVisible = persistedSettings.fpsEnabled !== false
+    let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled !== false
+    let attackPower = persistedSettings.attackPower ?? PLAYER_STATS.attackPower
+    let attackSpeed = persistedSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
+    let critChance = persistedSettings.critChance ?? PLAYER_STATS.critChance
 
-    const persistSettings = () => {
+    const persistSettings = (overrides = {}) => {
       saveGameSettings(
         {
           ...loadGameSettings({}),
+          gameStarted: false,
           pressureTestEnabled: isPressureTestEnabled,
+          equippedShipItemId: equippedState.shipItemId,
+          equippedExhaustItemId: equippedState.exhaustItemId,
+          musicEnabled: isMusicEnabled,
+          fpsEnabled: isFpsVisible,
+          impactEffectsEnabled: isImpactEffectsEnabled,
+          attackPower,
+          attackSpeed,
+          critChance,
+          ...overrides,
         },
       )
     }
@@ -417,82 +881,155 @@ export class MainSceneController {
     )
 
     const previewPanel = createShipPreviewPanel({
-      x: 56,
-      y: 64,
+      x: 794,
+      y: 34,
       width: 430,
-      height: 634,
+      height: 520,
     })
+    previewPanel.setTheme(getPreviewShipTheme(equippedState))
+    previewPanel.setExhaustIndex(getPreviewExhaustIndex(equippedState))
     gameLayer.addChild(previewPanel.container)
 
-    const inventoryPanel = createInventoryPanel({
-      x: 516,
-      y: 64,
-      width: 708,
-      height: 634,
-    })
-    gameLayer.addChild(inventoryPanel)
-
-    const settingsOverlay = createMainSceneSettingsOverlay({
+    const catalogOverlay = createCatalogOverlay({
       x: 0,
       y: 0,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
-      enabled: isPressureTestEnabled,
-      onToggle: (enabled) => {
-        isPressureTestEnabled = enabled
+      entries: SHIP_CATALOG,
+      onClose: () => {
+        catalogOverlay.hide()
+        isCatalogVisible = false
+      },
+    })
+    const getSettingsOverlayState = () => ({
+      musicEnabled: isMusicEnabled,
+      fpsEnabled: isFpsVisible,
+      impactEffectsEnabled: isImpactEffectsEnabled,
+      attackPower,
+      attackSpeed,
+      critChance,
+    })
+    const settingsOverlay = createSettingsOverlay({
+      x: 0,
+      y: 0,
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+      state: getSettingsOverlayState(),
+      onMusicToggle: (enabled) => {
+        isMusicEnabled = enabled
         persistSettings()
-        settingsOverlay.update(isPressureTestEnabled)
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onFpsToggle: (enabled) => {
+        isFpsVisible = enabled
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onImpactEffectsToggle: (enabled) => {
+        isImpactEffectsEnabled = enabled
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onAdjustStat: (key, direction) => {
+        if (key === 'attackPower') attackPower = Math.max(1, Math.round(attackPower + direction))
+        if (key === 'attackSpeed') attackSpeed = Math.max(1, Math.round((attackSpeed + direction * 0.5) * 10) / 10)
+        if (key === 'critChance') {
+          critChance = Math.max(0, Math.min(1, Math.round((critChance + direction * 0.05) * 100) / 100))
+        }
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+      onCatalogOpen: () => {
+        settingsOverlay.hide()
+        isSettingsVisible = false
+        catalogOverlay.toggle()
+        isCatalogVisible = catalogOverlay.isVisible()
+      },
+      onClearData: () => {
+        clearGameSettings()
+      },
+      onEnterDebugScene: () => {
+        persistSettings({
+          gameStarted: true,
+          pressureTestEnabled: true,
+        })
+      },
+      onLeave: () => {
+        saveGameSettings({
+          ...loadGameSettings({}),
+          gameStarted: false,
+        })
       },
       onClose: () => {
         settingsOverlay.hide()
         isSettingsVisible = false
       },
     })
-
     const settingsButton = createSettingsButton({
-      x: LOGICAL_WIDTH - 48,
-      y: 14,
+      x: LOGICAL_WIDTH - 64,
+      y: 28,
       onTap: () => {
         settingsOverlay.toggle()
         isSettingsVisible = settingsOverlay.isVisible()
-        settingsOverlay.update(isPressureTestEnabled)
+        settingsOverlay.update(getSettingsOverlayState())
+      },
+    })
+    gameLayer.addChild(settingsButton.container)
+
+    const itemDetailModal = createItemDetailModal({
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+      onToggleEquip: (itemId) => {
+        const selectedItem = INVENTORY_ITEMS.find((item) => item.id === itemId)
+        if (!selectedItem) return
+        equippedState = toggleEquippedItem(selectedItem, equippedState)
+        inventoryPanel.update(equippedState)
+        previewPanel.setTheme(getPreviewShipTheme(equippedState))
+        previewPanel.setExhaustIndex(getPreviewExhaustIndex(equippedState))
+        startButton.setEnabled(canStartGame(equippedState))
+        itemDetailModal.update(selectedItem, equippedState)
+        persistSettings()
       },
     })
 
-    settingsBounds = settingsOverlay.bounds
-    settingsButtonBounds = settingsButton.bounds
+    const startButton = createStartButton({
+      x: 756,
+      y: 597,
+      width: 492,
+      height: 100,
+      label: '开始游戏',
+      onTap: () => {
+        if (!canStartGame(equippedState)) return
+        isPressureTestEnabled = false
+        persistSettings({
+          gameStarted: true,
+          pressureTestEnabled: isPressureTestEnabled,
+        })
+      },
+    })
+    startButton.setEnabled(canStartGame(equippedState))
+    gameLayer.addChild(startButton.container)
 
-    gameLayer.addChild(settingsButton.container)
+    const inventoryPanel = createInventoryPanel({
+      x: 28,
+      y: 24,
+      width: 702,
+      height: 674,
+      equippedState,
+      onSelectItem: (item) => {
+        itemDetailModal.update(item, equippedState)
+      },
+    })
+    gameLayer.addChild(inventoryPanel.container)
+    gameLayer.addChild(catalogOverlay.container)
     gameLayer.addChild(settingsOverlay.container)
-
-    const handlePointerDown = (event) => {
-      if (!isSettingsVisible) return
-
-      const rect = app.canvas.getBoundingClientRect()
-      const logicalX = (event.clientX - rect.left - layoutOffsetX) / layoutScale
-      const logicalY = (event.clientY - rect.top - layoutOffsetY) / layoutScale
-      const insideSettingsButton =
-        settingsButtonBounds &&
-        logicalX >= settingsButtonBounds.left &&
-        logicalX <= settingsButtonBounds.right &&
-        logicalY >= settingsButtonBounds.top &&
-        logicalY <= settingsButtonBounds.bottom
-      const insideSettings =
-        settingsBounds &&
-        logicalX >= settingsBounds.left &&
-        logicalX <= settingsBounds.right &&
-        logicalY >= settingsBounds.top &&
-        logicalY <= settingsBounds.bottom
-
-      if (!insideSettings && !insideSettingsButton) {
-        settingsOverlay.hide()
-        isSettingsVisible = false
-      }
-    }
+    gameLayer.addChild(itemDetailModal.container)
 
     const tick = (ticker) => {
-      animationTime += ticker.deltaMS / 1000
+      const deltaSeconds = ticker.deltaMS / 1000
+      animationTime += deltaSeconds
       const pulse = (Math.sin(animationTime * 3.1) + 1) * 0.5
+      previewPanel.update(deltaSeconds, animationTime, pulse)
       previewPanel.shipScene.shipGroup.y = Math.sin(animationTime * 1.5) * 6
       previewPanel.shipScene.shipGroup.rotation = Math.sin(animationTime * 0.9) * 0.03
       previewPanel.shipScene.flameGlow.scale.set(0.94 + pulse * 0.16, 0.88 + pulse * 0.12)
@@ -501,6 +1038,8 @@ export class MainSceneController {
       previewPanel.shipScene.flameGlow.alpha = 0.22 + pulse * 0.08
       previewPanel.shipScene.flameCore.alpha = 0.52 + pulse * 0.16
       previewPanel.shipScene.flameInner.alpha = 0.24 + pulse * 0.08
+      inventoryPanel.tick(deltaSeconds)
+      itemDetailModal.tick(deltaSeconds)
     }
 
     const layout = () => {
@@ -514,7 +1053,6 @@ export class MainSceneController {
       gameLayer.position.set(layoutOffsetX, layoutOffsetY)
     }
 
-    app.canvas.addEventListener('pointerdown', handlePointerDown, { passive: true })
     app.renderer.on('resize', layout)
     app.ticker.add(tick)
     layout()
@@ -527,9 +1065,11 @@ export class MainSceneController {
         this.app = null
       }
 
-      app.canvas.removeEventListener('pointerdown', handlePointerDown)
       app.renderer.off('resize', layout)
       app.ticker.remove(tick)
+      previewPanel.destroy()
+      inventoryPanel.destroy()
+      itemDetailModal.destroy()
 
       if (initialized) {
         app.destroy(true, { children: true })

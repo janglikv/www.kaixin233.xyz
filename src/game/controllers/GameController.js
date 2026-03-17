@@ -16,8 +16,7 @@ import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { createStatsPanel } from '../renderers/createStatsPanel'
 import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
-import { loadGameSettings } from '../utils/gameSettingsStorage'
-import { saveGameSettings } from '../utils/gameSettingsStorage'
+import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
 
@@ -52,8 +51,13 @@ const PLAYER_STATS = {
   attackSpeed: 11.5,
   critChance: 1,
 }
+const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
+const EXHAUST_0_ITEM_ID = 'exhaust-0'
 const GAME_SETTINGS_DEFAULTS = {
+  gameStarted: true,
   pressureTestEnabled: true,
+  equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
+  equippedExhaustItemId: EXHAUST_0_ITEM_ID,
   musicEnabled: true,
   fpsEnabled: true,
   impactEffectsEnabled: true,
@@ -69,8 +73,28 @@ const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
 const clampExhaustIndex = (value) =>
   clamp(Number.isFinite(value) ? Math.floor(value) : 0, 0, Math.max(0, EXHAUST_PLUGINS.length - 1))
 
+const getShipThemeByItemId = (itemId) => {
+  if (typeof itemId !== 'string') return SHIP_CATALOG[0]?.theme
+  const serial = Number(itemId.replace('ship-frame-', ''))
+  const shipEntry = SHIP_CATALOG.find((entry) => entry.serial === serial)
+  return shipEntry?.theme ?? SHIP_CATALOG[0]?.theme
+}
+
+const getExhaustIndexByItemId = (itemId) => {
+  if (typeof itemId !== 'string') return 0
+  const index = Number(itemId.replace('exhaust-', ''))
+  return clampExhaustIndex(index)
+}
+
 const normalizeGameSettings = (settings) => ({
+  gameStarted: settings.gameStarted !== false,
   pressureTestEnabled: settings.pressureTestEnabled !== false,
+  equippedShipItemId:
+    typeof settings.equippedShipItemId === 'string' ? settings.equippedShipItemId : SHIP_DEFAULT_ITEM_ID,
+  equippedExhaustItemId:
+    typeof settings.equippedExhaustItemId === 'string'
+      ? settings.equippedExhaustItemId
+      : EXHAUST_0_ITEM_ID,
   musicEnabled: Boolean(settings.musicEnabled),
   fpsEnabled: settings.fpsEnabled !== false,
   impactEffectsEnabled: settings.impactEffectsEnabled !== false,
@@ -234,10 +258,25 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
   }
 }
 
+const createEmptyEnemyFormation = () => ({
+  getHitboxes() {
+    return []
+  },
+  getShooters() {
+    return []
+  },
+  applyDamage() {
+    return null
+  },
+  update() {},
+  destroy() {},
+})
+
 export class GameController {
   constructor(container, options = {}) {
     this.container = container
     this.pluginIndex = options.pluginIndex ?? 0
+    this.spawnEnemies = options.spawnEnemies !== false
     this.app = null
     this.cleanupFn = null
     this.started = false
@@ -283,6 +322,10 @@ export class GameController {
     const audio = createSynthAudio()
     audio.setMusicEnabled(persistedSettings.musicEnabled)
     audio.resetRunState()
+    const playerShipTheme = getShipThemeByItemId(persistedSettings.equippedShipItemId)
+    const initialEquippedExhaustIndex = getExhaustIndexByItemId(
+      persistedSettings.equippedExhaustItemId,
+    )
     let layoutScale = 1
     let layoutOffsetX = 0
     let layoutOffsetY = 0
@@ -323,12 +366,15 @@ export class GameController {
       x: LOGICAL_WIDTH * 0.5,
       y: LOGICAL_HEIGHT * 0.72,
       shipScale: SHIP_SCALE,
+      shipTheme: playerShipTheme,
     })
-    const enemyFormation = createEnemyFormation({
-      PIXI,
-      renderer: app.renderer,
-      parent: worldLayer,
-    })
+    const enemyFormation = this.spawnEnemies
+      ? createEnemyFormation({
+          PIXI,
+          renderer: app.renderer,
+          parent: worldLayer,
+        })
+      : createEmptyEnemyFormation()
     const impactEffectSystem = createImpactEffectSystem(worldLayer)
     const fadeOverlay = new PIXI.Graphics()
     fadeOverlay
@@ -494,10 +540,12 @@ export class GameController {
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let isFpsVisible = persistedSettings.fpsEnabled
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
-    let currentExhaustIndex = persistedSettings.exhaustIndex
+    let currentExhaustIndex = initialEquippedExhaustIndex
     const persistSettings = () => {
       saveGameSettings(
         normalizeGameSettings({
+          ...loadGameSettings({}),
+          gameStarted: true,
           pressureTestEnabled: isPressureTestEnabled,
           musicEnabled: audio.isMusicEnabled(),
           fpsEnabled: isFpsVisible,
@@ -517,7 +565,6 @@ export class GameController {
       attackPower: playerStats.attackPower,
       attackSpeed: playerStats.attackSpeed,
       critChance: playerStats.critChance,
-      exhaustName: EXHAUST_PLUGINS[currentExhaustIndex]?.name ?? `#${currentExhaustIndex + 1}`,
     })
     const spawnImpact = (x, y, options = {}) => {
       if (!isImpactEffectsEnabled) return
@@ -594,12 +641,6 @@ export class GameController {
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
       state: getSettingsOverlayState(),
-      onPressureTestToggle: (enabled) => {
-        audio.playUiClick({ high: enabled })
-        isPressureTestEnabled = enabled
-        persistSettings()
-        settingsOverlay.update(getSettingsOverlayState())
-      },
       onMusicToggle: (enabled) => {
         audio.playUiClick({ high: enabled })
         audio.setMusicEnabled(enabled)
@@ -634,18 +675,31 @@ export class GameController {
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
       },
-      onFlameSwitch: () => {
-        audio.playUiClick({ high: true })
-        currentExhaustIndex = exhaustSwitcher.switchNext()
-        persistSettings()
-        settingsOverlay.update(getSettingsOverlayState())
-      },
       onCatalogOpen: () => {
         audio.playUiClick()
         settingsOverlay.hide()
         isSettingsVisible = false
         catalogOverlay.toggle()
         isCatalogVisible = catalogOverlay.isVisible()
+      },
+      onClearData: () => {
+        audio.playUiClick()
+        clearGameSettings()
+      },
+      onEnterDebugScene: () => {
+        audio.playUiClick()
+        saveGameSettings({
+          ...loadGameSettings({}),
+          gameStarted: true,
+          pressureTestEnabled: true,
+        })
+      },
+      onLeave: () => {
+        audio.playUiClick()
+        saveGameSettings({
+          ...loadGameSettings({}),
+          gameStarted: false,
+        })
       },
       onClose: () => {
         audio.playUiClick()

@@ -6,8 +6,11 @@ const CONTROL_BUTTON_WIDTH = 44
 const CONTROL_BUTTON_HEIGHT = 34
 const ACTION_BUTTON_WIDTH = 88
 const ACTION_BUTTON_HEIGHT = 36
-const ROW_START_Y = 142
+const TAB_Y = 84
+const ROW_START_Y = 146
 const ROW_GAP = 58
+const LARGE_ACTION_WIDTH = 260
+const LARGE_ACTION_HEIGHT = 52
 
 const createValueText = ({ x, y, width }) => {
   const text = new PIXI.Text({
@@ -25,7 +28,7 @@ const createValueText = ({ x, y, width }) => {
   return text
 }
 
-const createControlButton = ({ x, y, width, height, label, onTap }) => {
+const createControlButton = ({ x, y, width, height, label, onTap, variant = 'default' }) => {
   const button = new PIXI.Container()
   const bg = new PIXI.Graphics()
   const text = new PIXI.Text({
@@ -39,16 +42,31 @@ const createControlButton = ({ x, y, width, height, label, onTap }) => {
     },
   })
 
+  const palette =
+    variant === 'success'
+      ? {
+          idle: 0x137a43,
+          hover: 0x1b9a57,
+          stroke: 0x84f0b8,
+          hoverStroke: 0xb6ffd6,
+        }
+      : {
+          idle: 0x0a1836,
+          hover: 0x15325f,
+          stroke: 0x48638f,
+          hoverStroke: 0x7fcfff,
+        }
+
   const draw = (hovered = false) => {
     bg
       .clear()
       .roundRect(0, 0, width, height, 10)
       .fill({
-        color: hovered ? 0x15325f : 0x0a1836,
+        color: hovered ? palette.hover : palette.idle,
         alpha: 0.94,
       })
       .stroke({
-        color: hovered ? 0x7fcfff : 0x48638f,
+        color: hovered ? palette.hoverStroke : palette.stroke,
         width: 2,
         alpha: 0.95,
       })
@@ -158,7 +176,7 @@ const createStepperRow = ({ x, y, label, value, formatValue, onStep }) => {
   }
 }
 
-const createActionRow = ({ x, y, label, buttonLabel, value = '', onTap }) => {
+const createActionRow = ({ x, y, label, buttonLabel, value = '', onTap, variant = 'default' }) => {
   const container = new PIXI.Container()
   const valueText = createValueText({ x: 0, y: 17, width: 412 })
 
@@ -173,6 +191,7 @@ const createActionRow = ({ x, y, label, buttonLabel, value = '', onTap }) => {
       height: ACTION_BUTTON_HEIGHT,
       label: buttonLabel,
       onTap,
+      variant,
     }),
   )
   valueText.text = value
@@ -185,19 +204,130 @@ const createActionRow = ({ x, y, label, buttonLabel, value = '', onTap }) => {
   }
 }
 
+const createTabButton = ({ x, y, label, active, onTap }) => {
+  const button = new PIXI.Container()
+  const bg = new PIXI.Graphics()
+  const text = new PIXI.Text({
+    text: label,
+    style: {
+      fill: 0xe9f4ff,
+      fontFamily: 'IBM Plex Mono, monospace',
+      fontSize: 18,
+      fontWeight: '700',
+      align: 'center',
+    },
+  })
+  let isActive = active
+
+  const draw = (hovered = false) => {
+    bg
+      .clear()
+      .roundRect(0, 0, 120, 40, 12)
+      .fill({
+        color: isActive ? 0x184886 : hovered ? 0x15325f : 0x0a1836,
+        alpha: 0.96,
+      })
+      .stroke({
+        color: isActive ? 0xa8ebff : hovered ? 0x7fcfff : 0x48638f,
+        width: 2,
+        alpha: 0.95,
+      })
+  }
+
+  draw(false)
+  button.position.set(x, y)
+  button.eventMode = 'static'
+  button.cursor = 'pointer'
+  text.anchor.set(0.5)
+  text.position.set(60, 20)
+  button.addChild(bg)
+  button.addChild(text)
+  button.on('pointertap', onTap)
+  button.on('pointerover', () => draw(true))
+  button.on('pointerout', () => draw(false))
+
+  return {
+    container: button,
+    setActive(nextActive) {
+      isActive = nextActive
+      draw(false)
+    },
+  }
+}
+
+const createLargeActionButton = ({ x, y, width, height, label, onTap, variant = 'success' }) => {
+  const button = new PIXI.Container()
+  const bg = new PIXI.Graphics()
+  const text = new PIXI.Text({
+    text: label,
+    style: {
+      fill: 0xf8feff,
+      fontFamily: '"Noto Sans SC", "Microsoft YaHei", sans-serif',
+      fontSize: 22,
+      fontWeight: '900',
+      letterSpacing: 2,
+      align: 'center',
+    },
+  })
+
+  const palette =
+    variant === 'success'
+      ? {
+          idle: 0x137a43,
+          hover: 0x1b9a57,
+          stroke: 0x84f0b8,
+          hoverStroke: 0xb6ffd6,
+        }
+      : {
+          idle: 0x1467d9,
+          hover: 0x1e8dff,
+          stroke: 0x7fcfff,
+          hoverStroke: 0xa8ebff,
+        }
+
+  const draw = (hovered = false) => {
+    bg
+      .clear()
+      .roundRect(0, 0, width, height, 18)
+      .fill({ color: hovered ? palette.hover : palette.idle, alpha: 0.98 })
+      .stroke({
+        color: hovered ? palette.hoverStroke : palette.stroke,
+        width: 2,
+        alpha: 0.96,
+      })
+  }
+
+  draw(false)
+  button.position.set(x, y)
+  button.eventMode = 'static'
+  button.cursor = 'pointer'
+  text.anchor.set(0.5)
+  text.position.set(width * 0.5, height * 0.5)
+  button.addChild(bg)
+  button.addChild(text)
+  button.on('pointertap', onTap)
+  button.on('pointerover', () => draw(true))
+  button.on('pointerout', () => draw(false))
+
+  return {
+    container: button,
+  }
+}
+
 export const createSettingsOverlay = ({
   x,
   y,
   width,
   height,
   state,
-  onPressureTestToggle,
   onMusicToggle,
   onFpsToggle,
   onImpactEffectsToggle,
   onAdjustStat,
-  onFlameSwitch,
   onCatalogOpen,
+  onClearData,
+  onEnterDebugScene,
+  onLeave,
   onClose,
 }) => {
   const container = new PIXI.Container()
@@ -231,47 +361,49 @@ export const createSettingsOverlay = ({
   closeText.position.set(width - PANEL_PADDING - CLOSE_SIZE * 0.5, PANEL_PADDING + CLOSE_SIZE * 0.5)
   container.addChild(closeText)
 
-  const title = new PIXI.Text({
-    text: '设置',
-    style: {
-      fill: 0xe9f4ff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 40,
-      fontWeight: '700',
-    },
-  })
-  title.position.set(PANEL_PADDING, PANEL_PADDING + 4)
-  container.addChild(title)
+  const basicTabContainer = new PIXI.Container()
+  const debugTabContainer = new PIXI.Container()
+  let activeTab = 'basic'
 
-  const subtitle = new PIXI.Text({
-    text: '场景、音频、属性和调试入口会保存在本机',
-    style: {
-      fill: 0x8dbdff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 14,
-      letterSpacing: 0.4,
-    },
-  })
-  subtitle.position.set(PANEL_PADDING, 86)
-  container.addChild(subtitle)
-
-  const pressureTestRow = createToggleRow({
+  const basicTab = createTabButton({
     x: PANEL_PADDING,
-    y: ROW_START_Y,
-    label: '压力测试场景',
-    value: state.pressureTestEnabled,
-    onToggle: onPressureTestToggle,
+    y: TAB_Y,
+    label: '基础',
+    active: true,
+    onTap: () => {
+      activeTab = 'basic'
+      basicTab.setActive(true)
+      debugTab.setActive(false)
+      basicTabContainer.visible = true
+      debugTabContainer.visible = false
+    },
   })
+  const debugTab = createTabButton({
+    x: PANEL_PADDING + 132,
+    y: TAB_Y,
+    label: '调试',
+    active: false,
+    onTap: () => {
+      activeTab = 'debug'
+      basicTab.setActive(false)
+      debugTab.setActive(true)
+      basicTabContainer.visible = false
+      debugTabContainer.visible = true
+    },
+  })
+  container.addChild(basicTab.container)
+  container.addChild(debugTab.container)
+
   const musicRow = createToggleRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP,
+    y: ROW_START_Y,
     label: '音乐',
     value: state.musicEnabled,
     onToggle: onMusicToggle,
   })
   const fpsRow = createToggleRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 2,
+    y: ROW_START_Y + ROW_GAP,
     label: '帧率',
     value: state.fpsEnabled,
     onToggle: onFpsToggle,
@@ -285,7 +417,7 @@ export const createSettingsOverlay = ({
   })
   const attackPowerRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 4,
+    y: ROW_START_Y,
     label: '攻击力',
     value: state.attackPower,
     formatValue: (nextValue) => `${nextValue}`,
@@ -293,7 +425,7 @@ export const createSettingsOverlay = ({
   })
   const attackSpeedRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 5,
+    y: ROW_START_Y + ROW_GAP,
     label: '攻速',
     value: state.attackSpeed,
     formatValue: (nextValue) => `${nextValue.toFixed(1)}/s`,
@@ -301,48 +433,73 @@ export const createSettingsOverlay = ({
   })
   const critChanceRow = createStepperRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 6,
+    y: ROW_START_Y + ROW_GAP * 2,
     label: '暴击',
     value: state.critChance,
     formatValue: (nextValue) => `${(nextValue * 100).toFixed(0)}%`,
     onStep: (direction) => onAdjustStat('critChance', direction),
   })
-  const exhaustRow = createActionRow({
-    x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 7,
-    label: '尾焰',
-    buttonLabel: '切换',
-    value: state.exhaustName,
-    onTap: onFlameSwitch,
-  })
   const catalogRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 8,
+    y: ROW_START_Y + ROW_GAP * 4,
     label: '资料库',
     buttonLabel: '打开',
     value: '查看飞船资料',
     onTap: onCatalogOpen,
   })
+  const clearDataRow = createActionRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y + ROW_GAP * 5,
+    label: '清空数据',
+    buttonLabel: '执行',
+    value: '重置本地存档',
+    onTap: onClearData,
+  })
+  const debugSceneRow = createActionRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y + ROW_GAP * 6,
+    label: '调试场景',
+    buttonLabel: '进入',
+    value: '直接进入压测场景',
+    onTap: onEnterDebugScene,
+  })
+  const leaveButton = createLargeActionButton({
+    x: (width - LARGE_ACTION_WIDTH) * 0.5,
+    y: height - PANEL_PADDING - LARGE_ACTION_HEIGHT,
+    width: LARGE_ACTION_WIDTH,
+    height: LARGE_ACTION_HEIGHT,
+    label: '撤离',
+    onTap: onLeave,
+    variant: 'success',
+  })
 
   attackPowerRow.update(state.attackPower)
   attackSpeedRow.update(state.attackSpeed)
   critChanceRow.update(state.critChance)
-  exhaustRow.update(state.exhaustName)
   catalogRow.update('查看飞船资料')
 
   ;[
-    pressureTestRow.container,
     musicRow.container,
     fpsRow.container,
-    impactEffectsRow.container,
+  ].forEach((child) => {
+    basicTabContainer.addChild(child)
+  })
+
+  ;[
     attackPowerRow.container,
     attackSpeedRow.container,
     critChanceRow.container,
-    exhaustRow.container,
+    impactEffectsRow.container,
     catalogRow.container,
+    clearDataRow.container,
+    debugSceneRow.container,
   ].forEach((child) => {
-    container.addChild(child)
+    debugTabContainer.addChild(child)
   })
+  debugTabContainer.visible = false
+  container.addChild(basicTabContainer)
+  container.addChild(debugTabContainer)
+  basicTabContainer.addChild(leaveButton.container)
 
   return {
     container,
@@ -362,14 +519,14 @@ export const createSettingsOverlay = ({
       return container.visible
     },
     update(nextState) {
-      pressureTestRow.update(nextState.pressureTestEnabled)
       musicRow.update(nextState.musicEnabled)
       fpsRow.update(nextState.fpsEnabled)
       impactEffectsRow.update(nextState.impactEffectsEnabled)
       attackPowerRow.update(nextState.attackPower)
       attackSpeedRow.update(nextState.attackSpeed)
       critChanceRow.update(nextState.critChance)
-      exhaustRow.update(nextState.exhaustName)
+      basicTabContainer.visible = activeTab === 'basic'
+      debugTabContainer.visible = activeTab === 'debug'
     },
   }
 }
