@@ -1,39 +1,23 @@
 import * as PIXI from 'pixi.js'
 import { createSynthAudio } from '../audio/createSynthAudio'
-import { createBulletSystem } from '../effects/createBulletSystem'
 import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { RiftServitorSwarm } from '../enemies/RiftServitorSwarm'
 import { SHIP_CATALOG } from '../data/shipCatalog'
-import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
-import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
-import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
-import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
-import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
+import { clampExhaustIndex, createPlayerCombatRuntime } from '../runtime/createPlayerCombatRuntime'
 import { BattleOverlayController } from '../ui/BattleOverlayController'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
-import { createEcsWorld, createEntity } from '../ecs/createEcsWorld'
-import { ecsSystemRegistry } from '../ecs/ecsSystemRegistry'
 
 const LOGICAL_WIDTH = 1280
 const LOGICAL_HEIGHT = 720
-const SHIP_SCALE = 0.42
-const EFFECT_SCALE = 0.5
-const SHIP_THRUST_DISTANCE = 76 * SHIP_SCALE
-const SHIP_MUZZLE_OFFSET = 58 * SHIP_SCALE
-const SHIP_MOVE_SPEED = 260
-const SHIP_BOUND_HALF_WIDTH = 46 * SHIP_SCALE
-const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const WORLD_RADIUS = 0
 const NORMAL_ENEMY_SPAWN_X = LOGICAL_WIDTH * 0.5
 const NORMAL_ENEMY_SPAWN_Y = -92
 const PLAYER_MAX_HEALTH = 10
-const ENEMY_ATTACK_SPEED = 1
-const ENEMY_BULLET_DAMAGE = 5
 const GAME_OVER_FADE_TIME = 1.2
 const PLAYER_STATS = {
   attackPower: 1,
@@ -60,9 +44,6 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 const clampAttackPower = (value) => clamp(Math.round(value), 1, 999)
 const clampAttackSpeed = (value) => clamp(Math.round(value * 10) / 10, 1, 30)
 const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
-const clampExhaustIndex = (value) =>
-  clamp(Number.isFinite(value) ? Math.floor(value) : 0, 0, Math.max(0, EXHAUST_PLUGINS.length - 1))
-
 const getShipThemeByItemId = (itemId) => {
   if (typeof itemId !== 'string') return SHIP_CATALOG[0]?.theme
   const serial = Number(itemId.replace('ship-frame-', ''))
@@ -95,49 +76,6 @@ const normalizeGameSettings = (settings) => ({
   critChance: clampCritChance(settings.critChance),
   exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
 })
-
-const createGameplayWorld = ({ shipScene }) => {
-  const world = createEcsWorld()
-  const playerEntity = createEntity(world)
-
-  world.components.position.set(playerEntity, {
-    x: shipScene.shipX,
-    y: shipScene.shipY,
-  })
-  world.components.bounds.set(playerEntity, {
-    halfWidth: SHIP_BOUND_HALF_WIDTH,
-    halfHeight: SHIP_BOUND_HALF_HEIGHT,
-  })
-  world.components.playerControlled.set(playerEntity, { tag: 'player' })
-  world.links.shipScene.set(playerEntity, shipScene)
-
-  return {
-    world,
-    playerEntity,
-    syncPlayerRender() {
-      const position = world.components.position.get(playerEntity)
-      if (!position) return
-      shipScene.setPosition(position.x, position.y)
-    },
-    getPlayerPosition() {
-      return world.components.position.get(playerEntity)
-    },
-    updatePlayer(deltaSeconds, axis) {
-      ecsSystemRegistry.playerMovementSystem(world, {
-        deltaSeconds,
-        axis,
-        speed: SHIP_MOVE_SPEED,
-        clampRect: {
-          left: WORLD_INSET,
-          right: LOGICAL_WIDTH - WORLD_INSET,
-          top: WORLD_INSET,
-          bottom: LOGICAL_HEIGHT - WORLD_INSET,
-        },
-      })
-      this.syncPlayerRender()
-    },
-  }
-}
 
 const createEmptyEnemyFormation = () => ({
   getHitboxes() {
@@ -241,14 +179,6 @@ export class GameController {
       height: LOGICAL_HEIGHT,
     })
     worldLayer.addChild(spaceBackdrop)
-
-    const shipScene = createShipScene({
-      x: LOGICAL_WIDTH * 0.5,
-      y: LOGICAL_HEIGHT * 0.72,
-      shipScale: SHIP_SCALE,
-      shipTheme: playerShipTheme,
-    })
-    const gameplayWorld = createGameplayWorld({ shipScene })
     const enemyFormation = this.spawnEnemies
       ? new RiftServitorSwarm({
           parent: worldLayer,
@@ -312,10 +242,11 @@ export class GameController {
     const triggerGameOver = () => {
       if (gameOver) return
       gameOver = true
-      shipScene.shipGroup.visible = false
+      playerCombat.setShipVisible(false)
       audio.playExplosion({ large: true })
       audio.playGameOver()
-      spawnImpact(shipScene.shipX, shipScene.shipY, {
+      const playerPosition = playerCombat.getPosition()
+      spawnImpact(playerPosition.x, playerPosition.y, {
         scale: 3.2,
         flashOuterColor: 0xff4c39,
         flashInnerColor: 0xffd2a6,
@@ -336,109 +267,32 @@ export class GameController {
       )
     }
     let overlayController = null
-    const applyPlayerDamage = ({ damage, x, y, impactOptions = null }) => {
-      if (gameOver || damage <= 0) return
-      playerHealth.current = Math.max(0, playerHealth.current - damage)
-      overlayController?.updateHealth(playerHealth.current, playerHealth.max)
-      audio.playHit()
-      if (impactOptions) {
-        spawnImpact(x, y, impactOptions)
-      }
-      if (playerHealth.current <= 0) {
-        triggerGameOver()
-      }
+    let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
+    const spawnImpact = (x, y, options = {}) => {
+      if (!isImpactEffectsEnabled && options.force !== true) return
+      impactEffectSystem.spawn(x, y, options)
     }
-
-    const enemyBulletSystem = createEnemyBulletSystem(worldLayer, {
-      renderer: app.renderer,
-      onFire: () => {
-        audio.playEnemyShot()
-      },
-      onHit: ({ x, y }) => {
-        applyPlayerDamage({
-          damage: ENEMY_BULLET_DAMAGE,
-          x,
-          y,
-          impactOptions: { scale: 0.5 },
-        })
-      },
-    })
-    const homingBurstSystem = createHomingBurstSystem({
+    const playerCombat = createPlayerCombatRuntime({
+      PIXI,
       parent: worldLayer,
-      onSpawn: () => {
-        audio.playHomingLaunch()
-      },
-      onImpact: ({ x, y, target }) => {
-        const isCrit = Math.random() < playerStats.critChance
-        const damagedEnemy = enemyFormation.applyDamage(
-          target.id,
-          playerStats.attackPower * (isCrit ? 2 : 1),
-        )
-        audio.playHit({ crit: isCrit })
-        spawnImpact(x, y, { scale: isCrit ? 0.56 : 0.34 })
-        if (damagedEnemy?.died) {
-          audio.playExplosion({ large: true })
-          spawnImpact(damagedEnemy.x, damagedEnemy.y, {
-            scale: 2.7,
-            flashOuterColor: 0xff5a36,
-            flashInnerColor: 0xffd0a8,
-            sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
-          })
-        }
-        return isCrit
-      },
-    })
-    const bulletSystem = createBulletSystem(worldLayer, {
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
       renderer: app.renderer,
-      onFire: () => {
-        audio.playPlayerShot()
+      audio,
+      shipTheme: playerShipTheme,
+      initialExhaustIndex: initialEquippedExhaustIndex,
+      initialStats: playerStats,
+      initialHealth: playerHealth,
+      spawnImpact,
+      getEnemyFormation: () => enemyFormation,
+      onHealthChange: (currentHealth, maxHealth) => {
+        playerHealth.current = currentHealth
+        overlayController?.updateHealth(currentHealth, maxHealth)
       },
-      onHit: ({ x, y, target }) => {
-        const isCrit = Math.random() < playerStats.critChance
-        const damage = playerStats.attackPower * (isCrit ? 2 : 1)
-        const damagedEnemy = enemyFormation.applyDamage(target.id, damage)
-
-        audio.playHit({ crit: isCrit })
-        spawnImpact(x, y, {
-          scale: isCrit ? 0.62 : 0.28 + damage / 260,
-        })
-        if (damagedEnemy?.died) {
-          audio.playExplosion({ large: true })
-          spawnImpact(damagedEnemy.x, damagedEnemy.y, {
-            scale: 2.7,
-            flashOuterColor: 0xff5a36,
-            flashInnerColor: 0xffd0a8,
-            sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
-          })
+      onPlayerDepleted: () => {
+        if (!gameOver) {
+          triggerGameOver()
         }
-        if (!isCrit || !damagedEnemy) return
-
-        let followUpTarget = null
-        let followUpDistance = Infinity
-
-        enemyFormation.getHitboxes().forEach((enemy) => {
-          if (enemy.id === damagedEnemy.id) return
-          const distance = Math.hypot(enemy.centerX - damagedEnemy.x, enemy.centerY - damagedEnemy.y)
-          if (distance >= followUpDistance) return
-          followUpDistance = distance
-          followUpTarget = {
-            id: enemy.id,
-            x: enemy.centerX,
-            y: enemy.centerY,
-          }
-        })
-
-        homingBurstSystem.spawnPair({
-          x: shipScene.shipX,
-          y: shipScene.shipY - SHIP_MUZZLE_OFFSET,
-          target: followUpTarget,
-          getTargets: () =>
-            enemyFormation.getHitboxes().map((enemy) => ({
-              id: enemy.id,
-              x: enemy.centerX,
-              y: enemy.centerY,
-            })),
-        })
       },
     })
     const keyboard = createKeyboardController()
@@ -446,7 +300,6 @@ export class GameController {
     let activeCatalogPreviewCode = persistedSettings.catalogPreviewCode
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let isFpsVisible = persistedSettings.fpsEnabled
-    let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
     let currentExhaustIndex = initialEquippedExhaustIndex
     const buildSettingsSnapshot = (overrides = {}) =>
       normalizeGameSettings({
@@ -482,7 +335,12 @@ export class GameController {
       playerStats.attackSpeed = nextSettings.attackSpeed
       playerStats.critChance = nextSettings.critChance
       audio.setMusicEnabled(nextSettings.musicEnabled)
-      exhaustSwitcher.setIndex(currentExhaustIndex)
+      playerCombat.syncSettings({
+        attackPower: playerStats.attackPower,
+        attackSpeed: playerStats.attackSpeed,
+        critChance: playerStats.critChance,
+        exhaustIndex: currentExhaustIndex,
+      })
       overlayController?.updateStats(playerStats)
       overlayController?.syncFromState({
         isCatalogVisible,
@@ -503,10 +361,6 @@ export class GameController {
       attackSpeed: playerStats.attackSpeed,
       critChance: playerStats.critChance,
     })
-    const spawnImpact = (x, y, options = {}) => {
-      if (!isImpactEffectsEnabled && options.force !== true) return
-      impactEffectSystem.spawn(x, y, options)
-    }
     const unlockAudio = () => {
       audio.unlock()
     }
@@ -519,11 +373,14 @@ export class GameController {
         return !overlayController.containsInteractive(logicalX, logicalY)
       },
     })
-    const exhaustSwitcher = createExhaustSwitcher({
-      PIXI,
-      runtimeLayer: shipScene.runtimeLayer,
-      initialIndex: currentExhaustIndex,
-    })
+    gameOverLayer.addChild(fadeOverlay)
+    gameOverLayer.addChild(gameOverText)
+    gameOverLayer.addChild(gameOverSubText)
+
+    gameLayer.addChild(worldLayer)
+    gameLayer.addChild(worldMask)
+    gameLayer.addChild(gameOverLayer)
+
     overlayController = new BattleOverlayController({
       gameLayer,
       width: LOGICAL_WIDTH,
@@ -577,6 +434,12 @@ export class GameController {
         if (key === 'critChance') {
           playerStats.critChance = clampCritChance(playerStats.critChance + direction * 0.05)
         }
+        playerCombat.syncSettings({
+          attackPower: playerStats.attackPower,
+          attackSpeed: playerStats.attackSpeed,
+          critChance: playerStats.critChance,
+          exhaustIndex: currentExhaustIndex,
+        })
         overlayController.updateStats(playerStats)
         persistSettings()
       },
@@ -602,14 +465,6 @@ export class GameController {
         }))
       },
     })
-    worldLayer.addChild(shipScene.shipGroup)
-    gameOverLayer.addChild(fadeOverlay)
-    gameOverLayer.addChild(gameOverText)
-    gameOverLayer.addChild(gameOverSubText)
-
-    gameLayer.addChild(worldLayer)
-    gameLayer.addChild(worldMask)
-    gameLayer.addChild(gameOverLayer)
     window.addEventListener('game-settings-changed', syncFromStorage)
 
     let elapsedSeconds = 0
@@ -649,38 +504,12 @@ export class GameController {
       }
       spaceBackdrop.update?.(deltaSeconds)
       const axis = gameOver ? { horizontal: 0, vertical: 0 } : keyboard.getAxis()
-      gameplayWorld.updatePlayer(deltaSeconds, axis)
-      const playerPosition = gameplayWorld.getPlayerPosition()
-      const playerX = playerPosition?.x ?? shipScene.shipX
-      const playerY = playerPosition?.y ?? shipScene.shipY
-
-      const pulse = 0.82 + Math.sin(elapsedSeconds * 14) * 0.18
-
-      shipScene.flameGlow.scale.set(0.94 + pulse * 0.18, 0.86 + pulse * 0.12)
-      shipScene.flameCore.scale.set(0.92 + pulse * 0.4, 0.8 + pulse * 0.26)
-      shipScene.flameInner.scale.set(0.84 + pulse * 0.26, 0.74 + pulse * 0.18)
-      shipScene.flameGlow.alpha = 0.24 + pulse * 0.08
-      shipScene.flameCore.alpha = 0.46 + pulse * 0.14
-      shipScene.flameInner.alpha = 0.2 + pulse * 0.1
-
-      if (!gameOver) {
-        exhaustSwitcher.update(deltaSeconds, elapsedSeconds, {
-          originX: playerX,
-          originY: playerY + SHIP_THRUST_DISTANCE,
-          directionX: 0,
-          directionY: -1,
-          pulse,
-          scale: EFFECT_SCALE,
-        })
-      }
-      const playerTarget = gameOver
-        ? null
-        : {
-            left: playerX - 22,
-            right: playerX + 22,
-            top: playerY - 34,
-            bottom: playerY + 28,
-          }
+      playerCombat.update(deltaSeconds, elapsedSeconds, {
+        axis,
+        shouldFire: pointer.isFiring(),
+        gameOver,
+      })
+      const { x: playerX, y: playerY } = playerCombat.getPosition()
       enemyFormation.update(deltaSeconds, { x: playerX, y: playerY }, ({ x, y, damage }) => {
         audio.playExplosion({ large: true })
         spawnImpact(x, y, {
@@ -691,21 +520,8 @@ export class GameController {
           sparkColors: [0xff4f32, 0xff8554, 0xffd494],
         })
         if (gameOver) return
-        applyPlayerDamage({ damage, x, y })
+        playerCombat.applyIncomingDamage({ damage, x, y })
       })
-      enemyBulletSystem.update(deltaSeconds, {
-        shooters: enemyFormation.getShooters(),
-        fireInterval: 1 / ENEMY_ATTACK_SPEED,
-        target: playerTarget,
-      })
-      bulletSystem.update(deltaSeconds, {
-        shouldFire: !gameOver && pointer.isFiring(),
-        originX: playerX,
-        originY: playerY - SHIP_MUZZLE_OFFSET,
-        targets: enemyFormation.getHitboxes(),
-        fireInterval: 1 / playerStats.attackSpeed,
-      })
-      homingBurstSystem.update(deltaSeconds)
       impactEffectSystem.update(deltaSeconds)
       updateGameOverOverlay()
     }
@@ -727,14 +543,11 @@ export class GameController {
       app.canvas.removeEventListener('pointerdown', unlockAudio)
       window.removeEventListener('game-settings-changed', syncFromStorage)
 
-      bulletSystem.destroy()
-      enemyBulletSystem.destroy()
-      homingBurstSystem.destroy()
       impactEffectSystem.destroy()
       enemyFormation.destroy()
       keyboard.destroy()
       pointer.destroy()
-      exhaustSwitcher.destroy()
+      playerCombat.destroy()
       overlayController?.destroy()
       audio.destroy()
 
