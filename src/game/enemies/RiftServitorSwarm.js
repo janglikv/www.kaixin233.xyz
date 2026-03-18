@@ -132,7 +132,7 @@ export class RiftServitorSwarm {
   getHitboxes() {
     this.hitboxes.length = 0
     this.enemies.forEach((enemy) => {
-      if (enemy.health > 0) {
+      if (enemy.health > 0 && enemy.active) {
         this.hitboxes.push(enemy.hitbox)
       }
     })
