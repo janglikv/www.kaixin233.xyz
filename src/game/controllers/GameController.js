@@ -7,6 +7,7 @@ import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { clampExhaustIndex, createPlayerCombatRuntime } from '../runtime/createPlayerCombatRuntime'
 import { BattleOverlayController } from '../ui/BattleOverlayController'
+import { GameOverOverlayController } from '../ui/GameOverOverlayController'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
@@ -191,53 +192,11 @@ export class GameController {
         })
       : createEmptyEnemyFormation()
     const impactEffectSystem = createImpactEffectSystem(worldLayer)
-    const fadeOverlay = new PIXI.Graphics()
-    fadeOverlay
-      .rect(0, 0, LOGICAL_WIDTH, LOGICAL_HEIGHT)
-      .fill({ color: 0x000000, alpha: 1 })
-    fadeOverlay.alpha = 0
-
-    const gameOverText = new PIXI.Text({
-      text: '撤离失败',
-      style: {
-        fill: 0xd62f3f,
-        fontFamily: 'STKaiti, KaiTi, serif',
-        fontSize: 62,
-        fontWeight: '700',
-        letterSpacing: 2,
-        dropShadow: {
-          alpha: 0.35,
-          angle: Math.PI / 2,
-          blur: 10,
-          color: 0x220205,
-          distance: 6,
-        },
-      },
+    const gameOverOverlay = new GameOverOverlayController({
+      parent: gameOverLayer,
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
     })
-    gameOverText.anchor.set(0.5)
-    gameOverText.position.set(LOGICAL_WIDTH * 0.5, LOGICAL_HEIGHT * 0.475)
-    gameOverText.alpha = 0
-
-    const gameOverSubText = new PIXI.Text({
-      text: 'GAME OVER',
-      style: {
-        fill: 0xd62f3f,
-        fontFamily: 'Georgia, serif',
-        fontSize: 18,
-        fontWeight: '700',
-        letterSpacing: 4,
-        dropShadow: {
-          alpha: 0.22,
-          angle: Math.PI / 2,
-          blur: 8,
-          color: 0x140103,
-          distance: 4,
-        },
-      },
-    })
-    gameOverSubText.anchor.set(0.5)
-    gameOverSubText.position.set(LOGICAL_WIDTH * 0.5, LOGICAL_HEIGHT * 0.535)
-    gameOverSubText.alpha = 0
 
     const triggerGameOver = () => {
       if (gameOver) return
@@ -252,19 +211,6 @@ export class GameController {
         flashInnerColor: 0xffd2a6,
         sparkColors: [0xff3b30, 0xff7a45, 0xffc15a],
       })
-    }
-    const updateGameOverOverlay = () => {
-      fadeOverlay.alpha = gameOverFadeProgress * 0.66
-      gameOverText.alpha = Math.max(0, (gameOverFadeProgress - 0.22) / 0.5)
-      gameOverSubText.alpha = Math.max(0, (gameOverFadeProgress - 0.38) / 0.38)
-      gameOverText.position.set(
-        LOGICAL_WIDTH * 0.5,
-        LOGICAL_HEIGHT * 0.475 + (1 - gameOverText.alpha) * 12,
-      )
-      gameOverSubText.position.set(
-        LOGICAL_WIDTH * 0.5,
-        LOGICAL_HEIGHT * 0.535 + (1 - gameOverSubText.alpha) * 8,
-      )
     }
     let overlayController = null
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
@@ -373,10 +319,6 @@ export class GameController {
         return !overlayController.containsInteractive(logicalX, logicalY)
       },
     })
-    gameOverLayer.addChild(fadeOverlay)
-    gameOverLayer.addChild(gameOverText)
-    gameOverLayer.addChild(gameOverSubText)
-
     gameLayer.addChild(worldLayer)
     gameLayer.addChild(worldMask)
     gameLayer.addChild(gameOverLayer)
@@ -523,7 +465,7 @@ export class GameController {
         playerCombat.applyIncomingDamage({ damage, x, y })
       })
       impactEffectSystem.update(deltaSeconds)
-      updateGameOverOverlay()
+      gameOverOverlay.setProgress(gameOverFadeProgress)
     }
 
     app.renderer.on('resize', layout)
@@ -549,6 +491,7 @@ export class GameController {
       pointer.destroy()
       playerCombat.destroy()
       overlayController?.destroy()
+      gameOverOverlay.destroy()
       audio.destroy()
 
       if (initialized) {
