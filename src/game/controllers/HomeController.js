@@ -1086,6 +1086,7 @@ export class HomeController {
       const deltaSeconds = ticker.deltaMS / 1000
       animationTime += deltaSeconds
       spaceBackdrop.update?.(deltaSeconds)
+      catalogOverlay.update(deltaSeconds)
       const pulse = (Math.sin(animationTime * 3.1) + 1) * 0.5
       previewPanel.update(deltaSeconds, animationTime, pulse)
       previewPanel.shipScene.shipGroup.y = Math.sin(animationTime * 1.5) * 6

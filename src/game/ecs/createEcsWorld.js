@@ -14,6 +14,7 @@ export const createEcsWorld = () => ({
   links: {
     shipScene: new Map(),
     sprite: new Map(),
+    runtime: new Map(),
   },
 })
 

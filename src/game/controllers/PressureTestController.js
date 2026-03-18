@@ -39,6 +39,7 @@ const TEST_ENEMY_ROWS = 40
 const TEST_ENEMY_THEME_INDEX = 3
 const TEST_ENEMY_SCALE = 0.11
 const TEST_ENEMY_HEALTH = 1
+const TEST_ENEMY_COLLISION_RADIUS = 14
 const TEST_ENEMY_TOP_Y = -72
 const TEST_ENEMY_GAP_Y = 28
 const TEST_ENEMY_STAGGER_Y = TEST_ENEMY_GAP_Y * 0.5
@@ -207,6 +208,7 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
       world.components.enemy.set(enemyId, {
         id: enemyId,
         columnIndex,
+        collisionRadius: TEST_ENEMY_COLLISION_RADIUS,
         hitboxHalfWidth: 24,
         hitboxTopOffset: 30,
         hitboxBottomOffset: 28,
@@ -896,15 +898,18 @@ export class PressureTestController {
     }
 
     const tick = (ticker) => {
-      const deltaSeconds = ticker.deltaMS / 1000
-      elapsedSeconds += deltaSeconds
-      fpsSampleElapsed += deltaSeconds
+      const rawDeltaSeconds = ticker.deltaMS / 1000
+      fpsSampleElapsed += rawDeltaSeconds
       fpsFrameCount += 1
       if (fpsSampleElapsed >= 0.2) {
         fpsText.text = `帧率 ${Math.round(fpsFrameCount / fpsSampleElapsed)}`
         fpsSampleElapsed = 0
         fpsFrameCount = 0
       }
+      catalogOverlay.update(rawDeltaSeconds)
+      if (isSettingsVisible || isCatalogVisible) return
+      const deltaSeconds = rawDeltaSeconds
+      elapsedSeconds += deltaSeconds
       if (gameOver) {
         gameOverFadeProgress = Math.min(
           1,

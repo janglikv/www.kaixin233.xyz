@@ -88,6 +88,7 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
   const { withGlow = true } = options
   const root = new PIXI.Container()
   const anatomy = new PIXI.Container()
+  const appendages = new PIXI.Container()
   const accent = entry.accent ?? 0x8f5bff
   const shellDark = 0x12091f
   const shellMid = 0x1c0f2d
@@ -109,11 +110,23 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
   if (withGlow) {
     anatomy.addChild(glow)
   }
+  anatomy.addChild(appendages)
   anatomy.addChild(connectors)
   anatomy.addChild(body)
   anatomy.addChild(details)
 
   if (entry.silhouette === 'rift-servitor') {
+    const createLeg = (points, fillColor) => {
+      const leg = new PIXI.Container()
+      const graphic = new PIXI.Graphics()
+      graphic
+        .poly(points)
+        .fill({ color: fillColor, alpha: 0.98 })
+        .stroke({ color: accent, width: 1.4, alpha: 0.68 })
+      leg.addChild(graphic)
+      return leg
+    }
+
     shadow
       .ellipse(0, 28, 30, 9)
       .fill(0x02050d)
@@ -125,15 +138,15 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       .fill({ color: voidGlow, alpha: 0.14 })
     body
       .poly([-2, -22, -6, -12, -6, 0, -4, 10, -2, 14, 2, 14, 4, 10, 6, 0, 6, -12, 2, -22])
-      .fill({ color: shellDark, alpha: 0.98 })
+      .fill({ color: 0x231238, alpha: 0.98 })
       .stroke({ color: accent, width: 2, alpha: 0.85 })
     body
       .poly([-22, -12, -40, -18, -32, 0, -20, 8, -15, -6])
-      .fill({ color: shellMid, alpha: 1 })
+      .fill({ color: 0x32204a, alpha: 1 })
       .stroke({ color: accent, width: 1.8, alpha: 0.76 })
     body
       .poly([22, -12, 40, -18, 32, 0, 20, 8, 15, -6])
-      .fill({ color: shellMid, alpha: 1 })
+      .fill({ color: 0x32204a, alpha: 1 })
       .stroke({ color: accent, width: 1.8, alpha: 0.76 })
     connectors
       .moveTo(-2, -10)
@@ -145,14 +158,22 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       .lineTo(8, -9)
       .lineTo(14, -8)
       .stroke({ color: connectorColor, width: 6, alpha: 0.9, cap: 'round', join: 'round' })
-    body
-      .poly([-4, 18, -12, 22, -18, 42, -8, 34])
-      .fill({ color: shellLight, alpha: 0.98 })
-      .stroke({ color: accent, width: 1.6, alpha: 0.68 })
-    body
-      .poly([4, 18, 12, 22, 18, 42, 8, 34])
-      .fill({ color: shellLight, alpha: 0.98 })
-      .stroke({ color: accent, width: 1.6, alpha: 0.68 })
+    const backLegLeft = createLeg([-4, 18, -12, 22, -18, 42, -8, 34], 0x36244f)
+    backLegLeft.pivot.set(-4, 18)
+    backLegLeft.position.set(-4, 18)
+    appendages.addChild(backLegLeft)
+    const frontLegLeft = createLeg([-1, 16, -8, 20, -12, 36, -4, 30], 0x493063)
+    frontLegLeft.pivot.set(-1, 16)
+    frontLegLeft.position.set(-1, 16)
+    appendages.addChild(frontLegLeft)
+    const backLegRight = createLeg([4, 18, 12, 22, 18, 42, 8, 34], 0x36244f)
+    backLegRight.pivot.set(4, 18)
+    backLegRight.position.set(4, 18)
+    appendages.addChild(backLegRight)
+    const frontLegRight = createLeg([1, 16, 8, 20, 12, 36, 4, 30], 0x493063)
+    frontLegRight.pivot.set(1, 16)
+    frontLegRight.position.set(1, 16)
+    appendages.addChild(frontLegRight)
     connectors
       .moveTo(-2, 13)
       .lineTo(-6, 20)
@@ -170,6 +191,14 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
     details
       .ellipse(-0.6, -10.3, 1.3, 1.9)
       .fill({ color: 0xd7b0ff, alpha: 0.42 })
+    root.runtime = {
+      gait: [
+        { node: backLegLeft, phase: 0 },
+        { node: frontLegRight, phase: 0 },
+        { node: frontLegLeft, phase: Math.PI },
+        { node: backLegRight, phase: Math.PI },
+      ],
+    }
   } else if (entry.silhouette === 'hollow-pilgrim') {
     shadow
       .ellipse(0, 28, 30, 10)
@@ -346,6 +375,18 @@ const createPreviewGraphic = (entry, options) => {
   return createShip(entry.theme).ship
 }
 
+const animatePreviewGraphic = (preview, deltaSeconds, elapsedSeconds) => {
+  const gait = preview?.runtime?.gait
+  if (Array.isArray(gait) && gait.length > 0) {
+    gait.forEach((leg) => {
+      leg.node.rotation = Math.sin(elapsedSeconds * 7.6 + leg.phase) * 0.22
+      leg.node.y = leg.node.position.y + Math.cos(elapsedSeconds * 9.2 + leg.phase) * 0.9
+    })
+    preview.y = 10 + Math.sin(elapsedSeconds * 2.4) * 4
+  }
+  return deltaSeconds
+}
+
 const createPreviewCard = (entry, x, y, onOpenPreview) => {
   const card = new PIXI.Container()
   card.position.set(x, y)
@@ -480,6 +521,7 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
   modalPanel.addChild(modalPreviewStage)
 
   let currentModalPreview = null
+  let previewElapsedSeconds = 0
   const openPreviewModal = (entry) => {
     modalCode.text = entry.code
     modalCode.style.fill =
@@ -499,6 +541,7 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
     currentModalPreview.scale.set(entry.previewKind === 'void-creature' ? 2.4 : 1.1)
     currentModalPreview.position.set(0, 10)
     modalPreviewStage.addChild(currentModalPreview)
+    previewElapsedSeconds = 0
     activePreviewCode = entry.code
     modalOverlay.visible = true
     onPreviewOpen?.(entry.code)
@@ -566,6 +609,11 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
     },
     getActivePreviewCode() {
       return activePreviewCode
+    },
+    update(deltaSeconds) {
+      if (!modalOverlay.visible || !currentModalPreview) return
+      previewElapsedSeconds += deltaSeconds
+      animatePreviewGraphic(currentModalPreview, deltaSeconds, previewElapsedSeconds)
     },
     hide() {
       container.visible = false
