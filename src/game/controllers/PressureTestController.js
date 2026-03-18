@@ -1,13 +1,14 @@
 import * as PIXI from 'pixi.js'
 import { createSynthAudio } from '../audio/createSynthAudio'
 import { createBulletSystem } from '../effects/createBulletSystem'
+import { getEnemyCatalogEntryByPluginIndex } from '../data/shipCatalog'
 import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
 import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
 import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
-import { createCatalogOverlay, createVoidCreaturePreview } from '../renderers/createCatalogOverlay'
+import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
 import { createPlayerHealthBar } from '../renderers/createPlayerHealthBar'
 import { createSettingsButton } from '../renderers/createSettingsButton'
 import { createShip } from '../renderers/createShip'
@@ -33,17 +34,17 @@ const SHIP_BOUND_HALF_WIDTH = 46 * SHIP_SCALE
 const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const WORLD_RADIUS = 0
-const NORMAL_ENEMY_COLUMNS = 4
-const NORMAL_ENEMY_ROWS = 3
-const NORMAL_ENEMY_ENTRY_CODE = '#10'
-const NORMAL_ENEMY_SCALE = 0.24
-const NORMAL_ENEMY_HEALTH = 1
-const NORMAL_ENEMY_TOP_Y = -72
-const NORMAL_ENEMY_GAP_Y = 120
-const NORMAL_ENEMY_STAGGER_Y = NORMAL_ENEMY_GAP_Y * 0.5
-const NORMAL_ENEMY_SPEED_Y = 196
-const NORMAL_ENEMY_SIDE_PADDING = 180
-const NORMAL_ENEMY_RECYCLE_BUFFER = 120
+const TEST_ENEMY_COLUMNS = 72
+const TEST_ENEMY_ROWS = 40
+const TEST_ENEMY_THEME_INDEX = 3
+const TEST_ENEMY_SCALE = 0.11
+const TEST_ENEMY_HEALTH = 1
+const TEST_ENEMY_TOP_Y = -72
+const TEST_ENEMY_GAP_Y = 28
+const TEST_ENEMY_STAGGER_Y = TEST_ENEMY_GAP_Y * 0.5
+const TEST_ENEMY_SPEED_Y = 196
+const TEST_ENEMY_SIDE_PADDING = 8
+const TEST_ENEMY_RECYCLE_BUFFER = 120
 const PLAYER_MAX_HEALTH = 10
 const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
@@ -57,7 +58,7 @@ const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const EXHAUST_0_ITEM_ID = 'exhaust-0'
 const GAME_SETTINGS_DEFAULTS = {
   gameStarted: true,
-  pressureTestEnabled: false,
+  pressureTestEnabled: true,
   equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
   equippedExhaustItemId: EXHAUST_0_ITEM_ID,
   musicEnabled: true,
@@ -91,7 +92,7 @@ const getExhaustIndexByItemId = (itemId) => {
 
 const normalizeGameSettings = (settings) => ({
   gameStarted: settings.gameStarted !== false,
-  pressureTestEnabled: settings.pressureTestEnabled === true,
+  pressureTestEnabled: settings.pressureTestEnabled !== false,
   equippedShipItemId:
     typeof settings.equippedShipItemId === 'string' ? settings.equippedShipItemId : SHIP_DEFAULT_ITEM_ID,
   equippedExhaustItemId:
@@ -109,19 +110,14 @@ const normalizeGameSettings = (settings) => ({
   exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
 })
 
-const createEnemySpriteAsset = ({ PIXI, renderer, entry, scale }) => {
-  let ship
-  if (entry?.previewKind === 'void-creature') {
-    ship = createVoidCreaturePreview(entry, { withGlow: false })
-  } else {
-    const builtShip = createShip(entry?.theme)
-    builtShip.flameGlow.visible = false
-    builtShip.flameCore.visible = false
-    builtShip.flameInner.visible = false
-    ship = builtShip.ship
-    ship.rotation = Math.PI
-  }
-  ship.scale.set(scale)
+const createEnemySpriteAsset = ({ PIXI, renderer, shipTheme }) => {
+  const { ship, flameGlow, flameCore, flameInner } = createShip(shipTheme)
+
+  flameGlow.visible = false
+  flameCore.visible = false
+  flameInner.visible = false
+  ship.rotation = Math.PI
+  ship.scale.set(TEST_ENEMY_SCALE)
 
   const bounds = ship.getLocalBounds()
   ship.position.set(-bounds.x, -bounds.y)
@@ -139,19 +135,18 @@ const createEnemySpriteAsset = ({ PIXI, renderer, entry, scale }) => {
 const createEnemyFormation = ({ PIXI, renderer, parent }) => {
   const world = createEcsWorld()
   const activeHitboxes = []
-  const enemyCatalogEntry = CATALOG_ENTRIES.find((entry) => entry.code === NORMAL_ENEMY_ENTRY_CODE)
+  const enemyCatalogEntry = getEnemyCatalogEntryByPluginIndex(TEST_ENEMY_THEME_INDEX)
   const enemySpriteAsset = createEnemySpriteAsset({
     PIXI,
     renderer,
-    entry: enemyCatalogEntry,
-    scale: NORMAL_ENEMY_SCALE,
+    shipTheme: enemyCatalogEntry.theme,
   })
   const columnSpacing =
-    NORMAL_ENEMY_COLUMNS > 1
-      ? (LOGICAL_WIDTH - NORMAL_ENEMY_SIDE_PADDING * 2) / (NORMAL_ENEMY_COLUMNS - 1)
+    TEST_ENEMY_COLUMNS > 1
+      ? (LOGICAL_WIDTH - TEST_ENEMY_SIDE_PADDING * 2) / (TEST_ENEMY_COLUMNS - 1)
       : 0
-  const recycleSpan = NORMAL_ENEMY_ROWS * NORMAL_ENEMY_GAP_Y
-  const bottomLimit = LOGICAL_HEIGHT + NORMAL_ENEMY_RECYCLE_BUFFER
+  const recycleSpan = TEST_ENEMY_ROWS * TEST_ENEMY_GAP_Y
+  const bottomLimit = LOGICAL_HEIGHT + TEST_ENEMY_RECYCLE_BUFFER
 
   const syncEnemySprite = (entityId) => {
     const position = world.components.position.get(entityId)
@@ -182,13 +177,13 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
     hitbox.health = health.current
   }
 
-  for (let rowIndex = 0; rowIndex < NORMAL_ENEMY_ROWS; rowIndex += 1) {
-    for (let columnIndex = 0; columnIndex < NORMAL_ENEMY_COLUMNS; columnIndex += 1) {
-      const x = NORMAL_ENEMY_SIDE_PADDING + columnIndex * columnSpacing
+  for (let rowIndex = 0; rowIndex < TEST_ENEMY_ROWS; rowIndex += 1) {
+    for (let columnIndex = 0; columnIndex < TEST_ENEMY_COLUMNS; columnIndex += 1) {
+      const x = TEST_ENEMY_SIDE_PADDING + columnIndex * columnSpacing
       const y =
-        NORMAL_ENEMY_TOP_Y -
-        rowIndex * NORMAL_ENEMY_GAP_Y +
-        (columnIndex % 2 === 0 ? 0 : NORMAL_ENEMY_STAGGER_Y)
+        TEST_ENEMY_TOP_Y -
+        rowIndex * TEST_ENEMY_GAP_Y +
+        (columnIndex % 2 === 0 ? 0 : TEST_ENEMY_STAGGER_Y)
       const enemyId = createEntity(world)
       const sprite = new PIXI.Sprite(enemySpriteAsset.texture)
       sprite.anchor.set(enemySpriteAsset.anchorX, enemySpriteAsset.anchorY)
@@ -203,15 +198,12 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
         id: enemyId,
         centerX: x,
         centerY: y + 8,
-        health: NORMAL_ENEMY_HEALTH,
+        health: TEST_ENEMY_HEALTH,
       }
       world.components.position.set(enemyId, { x, y })
-      world.components.velocity.set(enemyId, { x: 0, y: NORMAL_ENEMY_SPEED_Y })
-      world.components.health.set(enemyId, { current: NORMAL_ENEMY_HEALTH })
-      world.components.recycle.set(enemyId, {
-        spanY: recycleSpan,
-        resetHealth: NORMAL_ENEMY_HEALTH,
-      })
+      world.components.velocity.set(enemyId, { x: 0, y: TEST_ENEMY_SPEED_Y })
+      world.components.health.set(enemyId, { current: TEST_ENEMY_HEALTH })
+      world.components.recycle.set(enemyId, { spanY: recycleSpan, resetHealth: TEST_ENEMY_HEALTH })
       world.components.enemy.set(enemyId, {
         id: enemyId,
         columnIndex,
@@ -223,7 +215,7 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
       world.components.hitbox.set(enemyId, hitbox)
       world.links.sprite.set(enemyId, sprite)
       syncEnemySprite(enemyId)
-      hitbox.health = NORMAL_ENEMY_HEALTH
+      hitbox.health = TEST_ENEMY_HEALTH
       activeHitboxes.push(hitbox)
     }
   }
@@ -359,11 +351,11 @@ const createEmptyEnemyFormation = () => ({
   destroy() {},
 })
 
-export class GameController {
-  constructor(container) {
+export class PressureTestController {
+  constructor(container, options = {}) {
     this.container = container
-    this.pluginIndex = 0
-    this.spawnEnemies = true
+    this.pluginIndex = options.pluginIndex ?? 0
+    this.spawnEnemies = options.spawnEnemies !== false
     this.app = null
     this.cleanupFn = null
     this.started = false

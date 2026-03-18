@@ -26,7 +26,6 @@ const EXHAUST_1_PLUGIN = EXHAUST_PLUGINS[1]
 const PREVIEW_THRUST_DISTANCE = 76 * 1.02
 const PREVIEW_EFFECT_SCALE = 0.9
 const PREVIEW_SHIP_ROTATION = 0.12
-
 const LOGICAL_WIDTH = 1280
 const LOGICAL_HEIGHT = 720
 const PLAYER_STATS = {
@@ -809,7 +808,7 @@ const createInventoryPanel = ({ x, y, width, height, equippedState, onSelectItem
   }
 }
 
-export class MainSceneController {
+export class HomeController {
   constructor(container) {
     this.container = container
     this.app = null

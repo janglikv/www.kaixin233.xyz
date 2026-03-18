@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { EmptySceneController } from './game/controllers/EmptySceneController'
 import { GameController } from './game/controllers/GameController'
-import { MainSceneController } from './game/controllers/MainSceneController'
+import { HomeController } from './game/controllers/HomeController'
+import { PressureTestController } from './game/controllers/PressureTestController'
 import { loadGameSettings } from './game/utils/gameSettingsStorage'
 
 const getSceneState = () => {
@@ -17,18 +17,19 @@ const getSceneState = () => {
 }
 
 let CurrentGameController = GameController
-let CurrentMainSceneController = MainSceneController
-let CurrentEmptySceneController = EmptySceneController
+let CurrentHomeController = HomeController
+let CurrentPressureTestController = PressureTestController
 
 if (import.meta.hot) {
   import.meta.hot.accept('./game/controllers/GameController', (module) => {
     CurrentGameController = module?.GameController ?? CurrentGameController
   })
-  import.meta.hot.accept('./game/controllers/EmptySceneController', (module) => {
-    CurrentEmptySceneController = module?.EmptySceneController ?? CurrentEmptySceneController
+  import.meta.hot.accept('./game/controllers/PressureTestController', (module) => {
+    CurrentPressureTestController =
+      module?.PressureTestController ?? CurrentPressureTestController
   })
-  import.meta.hot.accept('./game/controllers/MainSceneController', (module) => {
-    CurrentMainSceneController = module?.MainSceneController ?? CurrentMainSceneController
+  import.meta.hot.accept('./game/controllers/HomeController', (module) => {
+    CurrentHomeController = module?.HomeController ?? CurrentHomeController
   })
 }
 
@@ -85,11 +86,11 @@ export default function App() {
   useEffect(() => {
     if (!containerRef.current) return undefined
 
-    let ControllerClass = CurrentMainSceneController
+    let ControllerClass = CurrentHomeController
     if (sceneState.gameStarted) {
       ControllerClass = sceneState.pressureTestEnabled
-        ? CurrentGameController
-        : CurrentEmptySceneController
+        ? CurrentPressureTestController
+        : CurrentGameController
     }
     const controller = new ControllerClass(containerRef.current)
     controllerRef.current = controller

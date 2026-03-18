@@ -84,7 +84,7 @@ const createModalCloseButton = ({ x, y, onTap }) => {
   return button
 }
 
-const createVoidCreaturePreview = (entry, options = {}) => {
+export const createVoidCreaturePreview = (entry, options = {}) => {
   const { withGlow = true } = options
   const root = new PIXI.Container()
   const anatomy = new PIXI.Container()
