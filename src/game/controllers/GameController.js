@@ -4,6 +4,7 @@ import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { RiftServitorSwarm } from '../enemies/RiftServitorSwarm'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
+import { createBattleFlowRuntime } from '../runtime/createBattleFlowRuntime'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { createGameSceneRuntime } from '../runtime/createGameSceneRuntime'
 import {
@@ -144,8 +145,6 @@ export class GameController {
       current: PLAYER_MAX_HEALTH,
       max: PLAYER_MAX_HEALTH,
     }
-    let gameOver = false
-    let gameOverFadeProgress = 0
     const playerStats = {
       attackPower: persistedSettings.attackPower,
       attackSpeed: persistedSettings.attackSpeed,
@@ -174,21 +173,6 @@ export class GameController {
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
     })
-
-    const triggerGameOver = () => {
-      if (gameOver) return
-      gameOver = true
-      playerCombat.setShipVisible(false)
-      audio.playExplosion({ large: true })
-      audio.playGameOver()
-      const playerPosition = playerCombat.getPosition()
-      spawnImpact(playerPosition.x, playerPosition.y, {
-        scale: 3.2,
-        flashOuterColor: 0xff4c39,
-        flashInnerColor: 0xffd2a6,
-        sparkColors: [0xff3b30, 0xff7a45, 0xffc15a],
-      })
-    }
     let overlayController = null
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
     const spawnImpact = (x, y, options = {}) => {
@@ -213,11 +197,10 @@ export class GameController {
         overlayController?.updateHealth(currentHealth, maxHealth)
       },
       onPlayerDepleted: () => {
-        if (!gameOver) {
-          triggerGameOver()
-        }
+        battleFlow?.triggerGameOver()
       },
     })
+    let battleFlow = null
     const keyboard = createKeyboardController()
     let currentExhaustIndex = initialEquippedExhaustIndex
     const syncFromStorage = () => {
@@ -364,9 +347,20 @@ export class GameController {
         })
       },
     })
+    battleFlow = createBattleFlowRuntime({
+      spaceBackdrop,
+      playerCombat,
+      enemyFormation,
+      impactEffectSystem,
+      gameOverOverlay,
+      keyboard,
+      pointer,
+      audio,
+      spawnImpact,
+      gameOverFadeTime: GAME_OVER_FADE_TIME,
+    })
     window.addEventListener('game-settings-changed', syncFromStorage)
 
-    let elapsedSeconds = 0
     let fpsSampleElapsed = 0
     let fpsFrameCount = 0
 
@@ -381,36 +375,7 @@ export class GameController {
       }
       overlayController.updatePreview(rawDeltaSeconds)
       if (overlayController.isPaused()) return
-      const deltaSeconds = rawDeltaSeconds
-      elapsedSeconds += deltaSeconds
-      if (gameOver) {
-        gameOverFadeProgress = Math.min(
-          1,
-          gameOverFadeProgress + deltaSeconds / GAME_OVER_FADE_TIME,
-        )
-      }
-      spaceBackdrop.update?.(deltaSeconds)
-      const axis = gameOver ? { horizontal: 0, vertical: 0 } : keyboard.getAxis()
-      playerCombat.update(deltaSeconds, elapsedSeconds, {
-        axis,
-        shouldFire: pointer.isFiring(),
-        gameOver,
-      })
-      const { x: playerX, y: playerY } = playerCombat.getPosition()
-      enemyFormation.update(deltaSeconds, { x: playerX, y: playerY }, ({ x, y, damage }) => {
-        audio.playExplosion({ large: true })
-        spawnImpact(x, y, {
-          force: true,
-          scale: 2.8,
-          flashOuterColor: 0xff5a36,
-          flashInnerColor: 0xffd8b0,
-          sparkColors: [0xff4f32, 0xff8554, 0xffd494],
-        })
-        if (gameOver) return
-        playerCombat.applyIncomingDamage({ damage, x, y })
-      })
-      impactEffectSystem.update(deltaSeconds)
-      gameOverOverlay.setProgress(gameOverFadeProgress)
+      battleFlow.update(rawDeltaSeconds)
     }
 
     app.renderer.on('resize', sceneRuntime.layout)
@@ -430,13 +395,10 @@ export class GameController {
       app.canvas.removeEventListener('pointerdown', unlockAudio)
       window.removeEventListener('game-settings-changed', syncFromStorage)
 
-      impactEffectSystem.destroy()
-      enemyFormation.destroy()
       keyboard.destroy()
       pointer.destroy()
-      playerCombat.destroy()
       overlayController?.destroy()
-      gameOverOverlay.destroy()
+      battleFlow?.destroy()
       audio.destroy()
 
       if (initialized) {
