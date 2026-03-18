@@ -41,12 +41,21 @@ export default function App() {
   useEffect(() => {
     if (!import.meta.hot) return undefined
 
+    const isGameModulePath = (path) =>
+      typeof path === 'string' && /(^|\/)src\/game\//.test(path)
+    const isEcsModulePath = (path) =>
+      typeof path === 'string' && /(^|\/)src\/game\/ecs\//.test(path)
+    const collectUpdatePaths = (update) =>
+      [update?.path, update?.acceptedPath].filter((path) => typeof path === 'string')
+
     const handleAfterUpdate = (payload) => {
-      const shouldRebuild = payload.updates.some((update) =>
-        update.path.includes('/src/game/'),
-      )
+      const rebuildPaths = payload.updates.flatMap(collectUpdatePaths).filter((path) => {
+        return isGameModulePath(path) && !isEcsModulePath(path)
+      })
+      const shouldRebuild = rebuildPaths.length > 0
 
       if (!shouldRebuild) return
+      console.info('[hmr] rebuild controller for:', rebuildPaths)
       setRebuildVersion((version) => version + 1)
     }
 

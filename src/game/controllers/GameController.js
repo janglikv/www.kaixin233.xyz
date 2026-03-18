@@ -20,6 +20,8 @@ import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
+import { createEcsWorld, createEntity, queryEntities } from '../ecs/createEcsWorld'
+import { ecsSystemRegistry } from '../ecs/ecsSystemRegistry'
 
 const LOGICAL_WIDTH = 1280
 const LOGICAL_HEIGHT = 720
@@ -131,7 +133,7 @@ const createEnemySpriteAsset = ({ PIXI, renderer, shipTheme }) => {
 }
 
 const createEnemyFormation = ({ PIXI, renderer, parent }) => {
-  const enemies = []
+  const world = createEcsWorld()
   const activeHitboxes = []
   const enemyCatalogEntry = getEnemyCatalogEntryByPluginIndex(TEST_ENEMY_THEME_INDEX)
   const enemySpriteAsset = createEnemySpriteAsset({
@@ -146,16 +148,33 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
   const recycleSpan = TEST_ENEMY_ROWS * TEST_ENEMY_GAP_Y
   const bottomLimit = LOGICAL_HEIGHT + TEST_ENEMY_RECYCLE_BUFFER
 
-  const recycleEnemy = (enemy, steps = 1) => {
-    enemy.health = TEST_ENEMY_HEALTH
-    enemy.y -= recycleSpan * steps
-    enemy.sprite.visible = true
-    enemy.hitbox.left = enemy.x - 24
-    enemy.hitbox.right = enemy.x + 24
-    enemy.hitbox.top = enemy.y - 30
-    enemy.hitbox.bottom = enemy.y + 28
-    enemy.hitbox.centerX = enemy.x
-    enemy.hitbox.centerY = enemy.y + 8
+  const syncEnemySprite = (entityId) => {
+    const position = world.components.position.get(entityId)
+    const sprite = world.links.sprite.get(entityId)
+    if (!position || !sprite) return
+    sprite.position.set(position.x, position.y)
+  }
+
+  const recycleEnemy = (entityId, steps = 1) => {
+    const position = world.components.position.get(entityId)
+    const health = world.components.health.get(entityId)
+    const recycle = world.components.recycle.get(entityId)
+    const sprite = world.links.sprite.get(entityId)
+    const hitbox = world.components.hitbox.get(entityId)
+    const enemy = world.components.enemy.get(entityId)
+
+    if (!position || !health || !recycle || !sprite || !hitbox || !enemy) return
+
+    health.current = recycle.resetHealth
+    position.y -= recycle.spanY * steps
+    sprite.visible = true
+    hitbox.left = position.x - enemy.hitboxHalfWidth
+    hitbox.right = position.x + enemy.hitboxHalfWidth
+    hitbox.top = position.y - enemy.hitboxTopOffset
+    hitbox.bottom = position.y + enemy.hitboxBottomOffset
+    hitbox.centerX = position.x
+    hitbox.centerY = position.y + enemy.hitboxCenterYOffset
+    hitbox.health = health.current
   }
 
   for (let rowIndex = 0; rowIndex < TEST_ENEMY_ROWS; rowIndex += 1) {
@@ -165,7 +184,7 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
         TEST_ENEMY_TOP_Y -
         rowIndex * TEST_ENEMY_GAP_Y +
         (columnIndex % 2 === 0 ? 0 : TEST_ENEMY_STAGGER_Y)
-      const enemyId = rowIndex * TEST_ENEMY_COLUMNS + columnIndex
+      const enemyId = createEntity(world)
       const sprite = new PIXI.Sprite(enemySpriteAsset.texture)
       sprite.anchor.set(enemySpriteAsset.anchorX, enemySpriteAsset.anchorY)
       sprite.position.set(x, y)
@@ -181,26 +200,37 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
         centerY: y + 8,
         health: TEST_ENEMY_HEALTH,
       }
-      const enemy = {
+      world.components.position.set(enemyId, { x, y })
+      world.components.velocity.set(enemyId, { x: 0, y: TEST_ENEMY_SPEED_Y })
+      world.components.health.set(enemyId, { current: TEST_ENEMY_HEALTH })
+      world.components.recycle.set(enemyId, { spanY: recycleSpan, resetHealth: TEST_ENEMY_HEALTH })
+      world.components.enemy.set(enemyId, {
         id: enemyId,
-        health: TEST_ENEMY_HEALTH,
-        x,
-        y,
         columnIndex,
-        sprite,
-        hitbox,
-      }
-      enemies.push(enemy)
+        hitboxHalfWidth: 24,
+        hitboxTopOffset: 30,
+        hitboxBottomOffset: 28,
+        hitboxCenterYOffset: 8,
+      })
+      world.components.hitbox.set(enemyId, hitbox)
+      world.links.sprite.set(enemyId, sprite)
+      syncEnemySprite(enemyId)
+      hitbox.health = TEST_ENEMY_HEALTH
       activeHitboxes.push(hitbox)
     }
   }
 
+  const findEnemyEntity = (enemyId) =>
+    queryEntities(world, ['enemy']).find((entityId) => world.components.enemy.get(entityId)?.id === enemyId)
+
   return {
     getHitboxes() {
       activeHitboxes.length = 0
-      enemies.forEach((enemy) => {
-        if (enemy.health > 0) {
-          activeHitboxes.push(enemy.hitbox)
+      queryEntities(world, ['enemy', 'health', 'hitbox']).forEach((entityId) => {
+        const health = world.components.health.get(entityId)
+        const hitbox = world.components.hitbox.get(entityId)
+        if (health?.current > 0 && hitbox) {
+          activeHitboxes.push(hitbox)
         }
       })
       return activeHitboxes
@@ -209,55 +239,100 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
       return []
     },
     applyDamage(enemyId, damage) {
-      const enemy = enemies.find((item) => item.id === enemyId)
-      if (!enemy || enemy.health <= 0) {
+      const entityId = findEnemyEntity(enemyId)
+      if (!entityId) {
         return null
       }
 
-      const previousHealth = enemy.health
-      enemy.health = Math.max(0, enemy.health - damage)
-      enemy.hitbox.health = enemy.health
-      const alive = enemy.health > 0
+      const enemy = world.components.enemy.get(entityId)
+      const position = world.components.position.get(entityId)
+      const health = world.components.health.get(entityId)
+      const hitbox = world.components.hitbox.get(entityId)
+      const sprite = world.links.sprite.get(entityId)
+
+      if (!enemy || !position || !health || !hitbox || !sprite || health.current <= 0) {
+        return null
+      }
+
+      const previousHealth = health.current
+      health.current = Math.max(0, health.current - damage)
+      hitbox.health = health.current
+      const alive = health.current > 0
       const died = previousHealth > 0 && !alive
       if (died) {
-        enemy.sprite.visible = false
+        sprite.visible = false
       }
 
       const hitResult = {
         id: enemy.id,
         alive,
         died,
-        health: enemy.health,
-        x: enemy.x,
-        y: enemy.y + 8,
+        health: health.current,
+        x: position.x,
+        y: position.y + enemy.hitboxCenterYOffset,
       }
 
       if (died) {
-        recycleEnemy(enemy)
-        enemy.sprite.position.set(enemy.x, enemy.y)
-        enemy.hitbox.health = enemy.health
+        recycleEnemy(entityId)
+        syncEnemySprite(entityId)
       }
 
       return hitResult
     },
     update(deltaSeconds) {
-      enemies.forEach((enemy) => {
-        enemy.y += TEST_ENEMY_SPEED_Y * deltaSeconds
-        if (enemy.y > bottomLimit) {
-          recycleEnemy(enemy)
-        }
-        enemy.sprite.position.set(enemy.x, enemy.y)
-        enemy.hitbox.left = enemy.x - 24
-        enemy.hitbox.right = enemy.x + 24
-        enemy.hitbox.top = enemy.y - 30
-        enemy.hitbox.bottom = enemy.y + 28
-        enemy.hitbox.centerX = enemy.x
-        enemy.hitbox.centerY = enemy.y + 8
-        enemy.hitbox.health = enemy.health
+      ecsSystemRegistry.enemyFormationSystem(world, {
+        deltaSeconds,
+        bottomLimit,
+      })
+      queryEntities(world, ['position']).forEach((entityId) => {
+        syncEnemySprite(entityId)
       })
     },
     destroy() {
       enemySpriteAsset.texture.destroy(true)
+    },
+  }
+}
+
+const createGameplayWorld = ({ shipScene }) => {
+  const world = createEcsWorld()
+  const playerEntity = createEntity(world)
+
+  world.components.position.set(playerEntity, {
+    x: shipScene.shipX,
+    y: shipScene.shipY,
+  })
+  world.components.bounds.set(playerEntity, {
+    halfWidth: SHIP_BOUND_HALF_WIDTH,
+    halfHeight: SHIP_BOUND_HALF_HEIGHT,
+  })
+  world.components.playerControlled.set(playerEntity, { tag: 'player' })
+  world.links.shipScene.set(playerEntity, shipScene)
+
+  return {
+    world,
+    playerEntity,
+    syncPlayerRender() {
+      const position = world.components.position.get(playerEntity)
+      if (!position) return
+      shipScene.setPosition(position.x, position.y)
+    },
+    getPlayerPosition() {
+      return world.components.position.get(playerEntity)
+    },
+    updatePlayer(deltaSeconds, axis) {
+      ecsSystemRegistry.playerMovementSystem(world, {
+        deltaSeconds,
+        axis,
+        speed: SHIP_MOVE_SPEED,
+        clampRect: {
+          left: WORLD_INSET,
+          right: LOGICAL_WIDTH - WORLD_INSET,
+          top: WORLD_INSET,
+          bottom: LOGICAL_HEIGHT - WORLD_INSET,
+        },
+      })
+      this.syncPlayerRender()
     },
   }
 }
@@ -372,6 +447,7 @@ export class GameController {
       shipScale: SHIP_SCALE,
       shipTheme: playerShipTheme,
     })
+    const gameplayWorld = createGameplayWorld({ shipScene })
     const enemyFormation = this.spawnEnemies
       ? createEnemyFormation({
           PIXI,
@@ -836,26 +912,11 @@ export class GameController {
           gameOverFadeProgress + deltaSeconds / GAME_OVER_FADE_TIME,
         )
       }
-      const { horizontal, vertical } = gameOver ? { horizontal: 0, vertical: 0 } : keyboard.getAxis()
-      const movementLength = Math.hypot(horizontal, vertical) || 1
-      const velocityX = (horizontal / movementLength) * SHIP_MOVE_SPEED
-      const velocityY = (vertical / movementLength) * SHIP_MOVE_SPEED
-      const nextShipX = Math.max(
-        WORLD_INSET + SHIP_BOUND_HALF_WIDTH,
-        Math.min(
-          LOGICAL_WIDTH - WORLD_INSET - SHIP_BOUND_HALF_WIDTH,
-          shipScene.shipX + velocityX * deltaSeconds,
-        ),
-      )
-      const nextShipY = Math.max(
-        WORLD_INSET + SHIP_BOUND_HALF_HEIGHT,
-        Math.min(
-          LOGICAL_HEIGHT - WORLD_INSET - SHIP_BOUND_HALF_HEIGHT,
-          shipScene.shipY + velocityY * deltaSeconds,
-        ),
-      )
-
-      shipScene.setPosition(nextShipX, nextShipY)
+      const axis = gameOver ? { horizontal: 0, vertical: 0 } : keyboard.getAxis()
+      gameplayWorld.updatePlayer(deltaSeconds, axis)
+      const playerPosition = gameplayWorld.getPlayerPosition()
+      const playerX = playerPosition?.x ?? shipScene.shipX
+      const playerY = playerPosition?.y ?? shipScene.shipY
 
       const pulse = 0.82 + Math.sin(elapsedSeconds * 14) * 0.18
 
@@ -868,8 +929,8 @@ export class GameController {
 
       if (!gameOver) {
         exhaustSwitcher.update(deltaSeconds, elapsedSeconds, {
-          originX: shipScene.shipX,
-          originY: shipScene.shipY + SHIP_THRUST_DISTANCE,
+          originX: playerX,
+          originY: playerY + SHIP_THRUST_DISTANCE,
           directionX: 0,
           directionY: -1,
           pulse,
@@ -883,16 +944,16 @@ export class GameController {
         target: gameOver
           ? null
           : {
-              left: shipScene.shipX - 22,
-              right: shipScene.shipX + 22,
-              top: shipScene.shipY - 34,
-              bottom: shipScene.shipY + 28,
+              left: playerX - 22,
+              right: playerX + 22,
+              top: playerY - 34,
+              bottom: playerY + 28,
             },
       })
       bulletSystem.update(deltaSeconds, {
         shouldFire: !gameOver && pointer.isFiring(),
-        originX: shipScene.shipX,
-        originY: shipScene.shipY - SHIP_MUZZLE_OFFSET,
+        originX: playerX,
+        originY: playerY - SHIP_MUZZLE_OFFSET,
         targets: enemyFormation.getHitboxes(),
         fireInterval: 1 / playerStats.attackSpeed,
       })
