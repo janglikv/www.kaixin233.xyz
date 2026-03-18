@@ -8,14 +8,10 @@ import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
 import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
 import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
-import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
-import { createPlayerHealthBar } from '../renderers/createPlayerHealthBar'
-import { createSettingsButton } from '../renderers/createSettingsButton'
-import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
 import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
-import { createStatsPanel } from '../renderers/createStatsPanel'
 import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
+import { BattleOverlayController } from '../ui/BattleOverlayController'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
@@ -326,6 +322,32 @@ export class GameController {
         sparkColors: [0xff3b30, 0xff7a45, 0xffc15a],
       })
     }
+    const updateGameOverOverlay = () => {
+      fadeOverlay.alpha = gameOverFadeProgress * 0.66
+      gameOverText.alpha = Math.max(0, (gameOverFadeProgress - 0.22) / 0.5)
+      gameOverSubText.alpha = Math.max(0, (gameOverFadeProgress - 0.38) / 0.38)
+      gameOverText.position.set(
+        LOGICAL_WIDTH * 0.5,
+        LOGICAL_HEIGHT * 0.475 + (1 - gameOverText.alpha) * 12,
+      )
+      gameOverSubText.position.set(
+        LOGICAL_WIDTH * 0.5,
+        LOGICAL_HEIGHT * 0.535 + (1 - gameOverSubText.alpha) * 8,
+      )
+    }
+    let overlayController = null
+    const applyPlayerDamage = ({ damage, x, y, impactOptions = null }) => {
+      if (gameOver || damage <= 0) return
+      playerHealth.current = Math.max(0, playerHealth.current - damage)
+      overlayController?.updateHealth(playerHealth.current, playerHealth.max)
+      audio.playHit()
+      if (impactOptions) {
+        spawnImpact(x, y, impactOptions)
+      }
+      if (playerHealth.current <= 0) {
+        triggerGameOver()
+      }
+    }
 
     const enemyBulletSystem = createEnemyBulletSystem(worldLayer, {
       renderer: app.renderer,
@@ -333,13 +355,12 @@ export class GameController {
         audio.playEnemyShot()
       },
       onHit: ({ x, y }) => {
-        playerHealth.current = Math.max(0, playerHealth.current - ENEMY_BULLET_DAMAGE)
-        playerHealthBar.update(playerHealth.current, playerHealth.max)
-        audio.playHit()
-        spawnImpact(x, y, { scale: 0.5 })
-        if (playerHealth.current <= 0) {
-          triggerGameOver()
-        }
+        applyPlayerDamage({
+          damage: ENEMY_BULLET_DAMAGE,
+          x,
+          y,
+          impactOptions: { scale: 0.5 },
+        })
       },
     })
     const homingBurstSystem = createHomingBurstSystem({
@@ -421,22 +442,17 @@ export class GameController {
       },
     })
     const keyboard = createKeyboardController()
-    let catalogBounds = null
-    let settingsButtonBounds = null
-    let settingsBounds = null
     let isCatalogVisible = persistedSettings.catalogVisible === true
     let activeCatalogPreviewCode = persistedSettings.catalogPreviewCode
-    let isSettingsVisible = false
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let isFpsVisible = persistedSettings.fpsEnabled
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
-    let equippedShipItemId = persistedSettings.equippedShipItemId
     let currentExhaustIndex = initialEquippedExhaustIndex
     const buildSettingsSnapshot = (overrides = {}) =>
       normalizeGameSettings({
         gameStarted: true,
         pressureTestEnabled: isPressureTestEnabled,
-        equippedShipItemId,
+        equippedShipItemId: persistedSettings.equippedShipItemId,
         equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
         musicEnabled: audio.isMusicEnabled(),
         fpsEnabled: isFpsVisible,
@@ -459,22 +475,21 @@ export class GameController {
       isPressureTestEnabled = nextSettings.pressureTestEnabled
       isFpsVisible = nextSettings.fpsEnabled
       isImpactEffectsEnabled = nextSettings.impactEffectsEnabled
-      equippedShipItemId = nextSettings.equippedShipItemId
       currentExhaustIndex = getExhaustIndexByItemId(nextSettings.equippedExhaustItemId)
       isCatalogVisible = nextSettings.catalogVisible === true
       activeCatalogPreviewCode = nextSettings.catalogPreviewCode
+      playerStats.attackPower = nextSettings.attackPower
+      playerStats.attackSpeed = nextSettings.attackSpeed
+      playerStats.critChance = nextSettings.critChance
       audio.setMusicEnabled(nextSettings.musicEnabled)
-      fpsText.visible = isFpsVisible
       exhaustSwitcher.setIndex(currentExhaustIndex)
-      if (isCatalogVisible) {
-        catalogOverlay.show()
-        if (activeCatalogPreviewCode) {
-          catalogOverlay.openPreviewByCode(activeCatalogPreviewCode)
-        }
-      } else {
-        catalogOverlay.hide()
-      }
-      settingsOverlay.update(getSettingsOverlayState())
+      overlayController?.updateStats(playerStats)
+      overlayController?.syncFromState({
+        isCatalogVisible,
+        activeCatalogPreviewCode,
+        isFpsVisible,
+        settingsState: getSettingsOverlayState(),
+      })
     }
     const persistSettings = () => {
       saveGameSettings(buildSettingsSnapshot())
@@ -501,29 +516,7 @@ export class GameController {
         const rect = app.canvas.getBoundingClientRect()
         const logicalX = (event.clientX - rect.left - layoutOffsetX) / layoutScale
         const logicalY = (event.clientY - rect.top - layoutOffsetY) / layoutScale
-
-        const insideCatalog =
-          isCatalogVisible &&
-          catalogBounds &&
-          logicalX >= catalogBounds.left &&
-          logicalX <= catalogBounds.right &&
-          logicalY >= catalogBounds.top &&
-          logicalY <= catalogBounds.bottom
-        const insideSettingsButton =
-          settingsButtonBounds &&
-          logicalX >= settingsButtonBounds.left &&
-          logicalX <= settingsButtonBounds.right &&
-          logicalY >= settingsButtonBounds.top &&
-          logicalY <= settingsButtonBounds.bottom
-        const insideSettings =
-          isSettingsVisible &&
-          settingsBounds &&
-          logicalX >= settingsBounds.left &&
-          logicalX <= settingsBounds.right &&
-          logicalY >= settingsBounds.top &&
-          logicalY <= settingsBounds.bottom
-
-        return !(insideCatalog || insideSettingsButton || insideSettings)
+        return !overlayController.containsInteractive(logicalX, logicalY)
       },
     })
     const exhaustSwitcher = createExhaustSwitcher({
@@ -531,26 +524,18 @@ export class GameController {
       runtimeLayer: shipScene.runtimeLayer,
       initialIndex: currentExhaustIndex,
     })
-
-    const statsPanel = createStatsPanel({
-      x: LOGICAL_WIDTH - 18,
-      y: LOGICAL_HEIGHT - 114,
-      stats: playerStats,
-    })
-    const playerHealthBar = createPlayerHealthBar({
-      x: LOGICAL_WIDTH - 18,
-      y: LOGICAL_HEIGHT - 16,
-      health: playerHealth.current,
-      maxHealth: playerHealth.max,
-      width: 144,
-      align: 'right',
-    })
-    const catalogOverlay = createCatalogOverlay({
-      x: 0,
-      y: 0,
+    overlayController = new BattleOverlayController({
+      gameLayer,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
       entries: CATALOG_ENTRIES,
+      playerStats,
+      playerHealth,
+      initialCatalogVisible: isCatalogVisible,
+      initialCatalogPreviewCode: activeCatalogPreviewCode,
+      initialFpsVisible: isFpsVisible,
+      getSettingsState: getSettingsOverlayState,
+      onUiClick: (options) => audio.playUiClick(options),
       onPreviewOpen: (code) => {
         activeCatalogPreviewCode = code
         persistSettings()
@@ -559,46 +544,27 @@ export class GameController {
         activeCatalogPreviewCode = null
         persistSettings()
       },
-      onClose: () => {
-        audio.playUiClick()
-        catalogOverlay.hide()
+      onCatalogClose: () => {
         isCatalogVisible = false
         activeCatalogPreviewCode = null
         persistSettings()
       },
-    })
-    if (isCatalogVisible) {
-      catalogOverlay.show()
-      if (activeCatalogPreviewCode) {
-        catalogOverlay.openPreviewByCode(activeCatalogPreviewCode)
-      }
-    }
-    const settingsOverlay = createSettingsOverlay({
-      x: 0,
-      y: 0,
-      width: LOGICAL_WIDTH,
-      height: LOGICAL_HEIGHT,
-      state: getSettingsOverlayState(),
       onMusicToggle: (enabled) => {
         audio.setMusicEnabled(enabled)
         if (enabled) {
           audio.playUiClick({ high: true })
         }
         persistSettings()
-        settingsOverlay.update(getSettingsOverlayState())
       },
       onFpsToggle: (enabled) => {
         audio.playUiClick({ high: enabled })
         isFpsVisible = enabled
-        fpsText.visible = isFpsVisible
         persistSettings()
-        settingsOverlay.update(getSettingsOverlayState())
       },
       onImpactEffectsToggle: (enabled) => {
         audio.playUiClick({ high: enabled })
         isImpactEffectsEnabled = enabled
         persistSettings()
-        settingsOverlay.update(getSettingsOverlayState())
       },
       onAdjustStat: (key, direction) => {
         audio.playUiClick({ high: direction > 0 })
@@ -611,68 +577,31 @@ export class GameController {
         if (key === 'critChance') {
           playerStats.critChance = clampCritChance(playerStats.critChance + direction * 0.05)
         }
-        statsPanel.update(playerStats)
+        overlayController.updateStats(playerStats)
         persistSettings()
-        settingsOverlay.update(getSettingsOverlayState())
       },
-      onCatalogOpen: () => {
-        audio.playUiClick()
-        settingsOverlay.hide()
-        isSettingsVisible = false
-        catalogOverlay.toggle()
-        isCatalogVisible = catalogOverlay.isVisible()
-        if (!isCatalogVisible) {
+      onCatalogOpen: (visible) => {
+        isCatalogVisible = visible
+        if (!visible) {
           activeCatalogPreviewCode = null
         }
         persistSettings()
       },
       onClearData: () => {
-        audio.playUiClick()
         clearGameSettings()
       },
       onEnterDebugScene: () => {
-        audio.playUiClick()
         saveGameSettings(buildSettingsSnapshot({
           gameStarted: true,
           pressureTestEnabled: true,
         }))
       },
       onLeave: () => {
-        audio.playUiClick()
         saveGameSettings(buildSettingsSnapshot({
           gameStarted: false,
         }))
       },
-      onClose: () => {
-        audio.playUiClick()
-        settingsOverlay.hide()
-        isSettingsVisible = false
-      },
     })
-    const fpsText = new PIXI.Text({
-      text: '帧率 0',
-      style: {
-        fill: 0x7cff72,
-        fontFamily: 'IBM Plex Mono, monospace',
-        fontSize: 14,
-        fontWeight: '700',
-      },
-    })
-    fpsText.position.set(14, 18)
-    fpsText.visible = isFpsVisible
-    const settingsButton = createSettingsButton({
-      x: LOGICAL_WIDTH - 48,
-      y: 14,
-      onTap: () => {
-        audio.playUiClick()
-        settingsOverlay.toggle()
-        isSettingsVisible = settingsOverlay.isVisible()
-        settingsOverlay.update(getSettingsOverlayState())
-      },
-    })
-    catalogBounds = catalogOverlay.bounds
-    settingsBounds = settingsOverlay.bounds
-    settingsButtonBounds = settingsButton.bounds
     worldLayer.addChild(shipScene.shipGroup)
     gameOverLayer.addChild(fadeOverlay)
     gameOverLayer.addChild(gameOverText)
@@ -680,12 +609,6 @@ export class GameController {
 
     gameLayer.addChild(worldLayer)
     gameLayer.addChild(worldMask)
-    gameLayer.addChild(fpsText)
-    gameLayer.addChild(settingsButton.container)
-    gameLayer.addChild(playerHealthBar.container)
-    gameLayer.addChild(statsPanel.container)
-    gameLayer.addChild(catalogOverlay.container)
-    gameLayer.addChild(settingsOverlay.container)
     gameLayer.addChild(gameOverLayer)
     window.addEventListener('game-settings-changed', syncFromStorage)
 
@@ -710,12 +633,12 @@ export class GameController {
       fpsSampleElapsed += rawDeltaSeconds
       fpsFrameCount += 1
       if (fpsSampleElapsed >= 0.2) {
-        fpsText.text = `帧率 ${Math.round(fpsFrameCount / fpsSampleElapsed)}`
+        overlayController.setFpsText(`帧率 ${Math.round(fpsFrameCount / fpsSampleElapsed)}`)
         fpsSampleElapsed = 0
         fpsFrameCount = 0
       }
-      catalogOverlay.update(rawDeltaSeconds)
-      if (isSettingsVisible || isCatalogVisible) return
+      overlayController.updatePreview(rawDeltaSeconds)
+      if (overlayController.isPaused()) return
       const deltaSeconds = rawDeltaSeconds
       elapsedSeconds += deltaSeconds
       if (gameOver) {
@@ -768,14 +691,7 @@ export class GameController {
           sparkColors: [0xff4f32, 0xff8554, 0xffd494],
         })
         if (gameOver) return
-        if (damage > 0) {
-          playerHealth.current = Math.max(0, playerHealth.current - damage)
-          playerHealthBar.update(playerHealth.current, playerHealth.max)
-          audio.playHit()
-        }
-        if (damage > 0 && playerHealth.current <= 0) {
-          triggerGameOver()
-        }
+        applyPlayerDamage({ damage, x, y })
       })
       enemyBulletSystem.update(deltaSeconds, {
         shooters: enemyFormation.getShooters(),
@@ -791,17 +707,7 @@ export class GameController {
       })
       homingBurstSystem.update(deltaSeconds)
       impactEffectSystem.update(deltaSeconds)
-      fadeOverlay.alpha = gameOverFadeProgress * 0.66
-      gameOverText.alpha = Math.max(0, (gameOverFadeProgress - 0.22) / 0.5)
-      gameOverSubText.alpha = Math.max(0, (gameOverFadeProgress - 0.38) / 0.38)
-      gameOverText.position.set(
-        LOGICAL_WIDTH * 0.5,
-        LOGICAL_HEIGHT * 0.475 + (1 - gameOverText.alpha) * 12,
-      )
-      gameOverSubText.position.set(
-        LOGICAL_WIDTH * 0.5,
-        LOGICAL_HEIGHT * 0.535 + (1 - gameOverSubText.alpha) * 8,
-      )
+      updateGameOverOverlay()
     }
 
     app.renderer.on('resize', layout)
@@ -829,6 +735,7 @@ export class GameController {
       keyboard.destroy()
       pointer.destroy()
       exhaustSwitcher.destroy()
+      overlayController?.destroy()
       audio.destroy()
 
       if (initialized) {
