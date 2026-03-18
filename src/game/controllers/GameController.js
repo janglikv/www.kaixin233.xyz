@@ -46,6 +46,7 @@ const NORMAL_ENEMY_COMMIT_SPEED = 228
 const NORMAL_ENEMY_SPAWN_INTERVAL = 1.08
 const NORMAL_ENEMY_RECYCLE_BUFFER = 120
 const NORMAL_ENEMY_CONTACT_DAMAGE = 3
+const NORMAL_ENEMY_TRACK_DISTANCE = 600
 const NORMAL_ENEMY_COMMIT_DISTANCE = 220
 const NORMAL_ENEMY_EXPLODE_DISTANCE = 96
 const NORMAL_ENEMY_COMMIT_MAX_DURATION = 1
@@ -362,13 +363,15 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
       activeEnemies.forEach((item) => {
         const { entityId, position, velocity, enemy, health, hitbox, sprite, runtime } = item
 
-        const targetX = seekTarget?.x ?? LOGICAL_WIDTH * 0.5
-        const targetY = seekTarget?.y ?? LOGICAL_HEIGHT * 0.75
-        const toTargetX = targetX - position.x
-        const toTargetY = targetY - position.y
+        const rawTargetX = seekTarget?.x ?? LOGICAL_WIDTH * 0.5
+        const rawTargetY = seekTarget?.y ?? LOGICAL_HEIGHT * 0.75
+        const toTargetX = rawTargetX - position.x
+        const toTargetY = rawTargetY - position.y
         let deltaX = toTargetX
         let deltaY = toTargetY
         let targetDistance = Math.hypot(toTargetX, toTargetY)
+        const trackingTarget =
+          seekTarget && targetDistance <= NORMAL_ENEMY_TRACK_DISTANCE ? seekTarget : null
         const cellX = Math.floor(position.x / ENEMY_SPATIAL_CELL_SIZE)
         const cellY = Math.floor(position.y / ENEMY_SPATIAL_CELL_SIZE)
         let separationX = 0
@@ -398,7 +401,7 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
           }
         }
 
-        if (!enemy.commit && seekTarget && targetDistance <= NORMAL_ENEMY_COMMIT_DISTANCE) {
+        if (!enemy.commit && trackingTarget && targetDistance <= NORMAL_ENEMY_COMMIT_DISTANCE) {
           enemy.commit = true
           enemy.commitElapsed = 0
           const commitLength = Math.hypot(toTargetX, toTargetY) || 1
@@ -425,7 +428,7 @@ const createEnemyFormation = ({ PIXI, renderer, parent }) => {
           const shouldRefreshSeek =
             Math.random() < NORMAL_ENEMY_TRACK_UPDATE_CHANCE ||
             (enemy.seekDirectionX === 0 && enemy.seekDirectionY === 1)
-          if (seekTarget && shouldRefreshSeek) {
+          if (trackingTarget && shouldRefreshSeek) {
             const seekLength = Math.hypot(toTargetX, toTargetY) || 1
             enemy.seekDirectionX = toTargetX / seekLength
             enemy.seekDirectionY = toTargetY / seekLength
