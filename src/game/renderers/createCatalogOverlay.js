@@ -126,6 +126,16 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       leg.addChild(graphic)
       return leg
     }
+    const createClaw = (points, fillColor) => {
+      const claw = new PIXI.Container()
+      const graphic = new PIXI.Graphics()
+      graphic
+        .poly(points)
+        .fill({ color: fillColor, alpha: 1 })
+        .stroke({ color: accent, width: 1.8, alpha: 0.76 })
+      claw.addChild(graphic)
+      return claw
+    }
 
     shadow
       .ellipse(0, 28, 30, 9)
@@ -140,14 +150,14 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       .poly([-2, -22, -6, -12, -6, 0, -4, 10, -2, 14, 2, 14, 4, 10, 6, 0, 6, -12, 2, -22])
       .fill({ color: 0x231238, alpha: 0.98 })
       .stroke({ color: accent, width: 2, alpha: 0.85 })
-    body
-      .poly([-22, -12, -40, -18, -32, 0, -20, 8, -15, -6])
-      .fill({ color: 0x32204a, alpha: 1 })
-      .stroke({ color: accent, width: 1.8, alpha: 0.76 })
-    body
-      .poly([22, -12, 40, -18, 32, 0, 20, 8, 15, -6])
-      .fill({ color: 0x32204a, alpha: 1 })
-      .stroke({ color: accent, width: 1.8, alpha: 0.76 })
+    const clawLeft = createClaw([-22, -12, -40, -18, -32, 0, -20, 8, -15, -6], 0x32204a)
+    clawLeft.pivot.set(-22, -12)
+    clawLeft.position.set(-22, -12)
+    appendages.addChild(clawLeft)
+    const clawRight = createClaw([22, -12, 40, -18, 32, 0, 20, 8, 15, -6], 0x32204a)
+    clawRight.pivot.set(22, -12)
+    clawRight.position.set(22, -12)
+    appendages.addChild(clawRight)
     connectors
       .moveTo(-2, -10)
       .lineTo(-8, -9)
@@ -197,6 +207,10 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
         { node: frontLegRight, phase: 0 },
         { node: frontLegLeft, phase: Math.PI },
         { node: backLegRight, phase: Math.PI },
+      ],
+      claws: [
+        { node: clawLeft, phase: 0 },
+        { node: clawRight, phase: Math.PI },
       ],
     }
   } else if (entry.silhouette === 'hollow-pilgrim') {
@@ -377,10 +391,13 @@ const createPreviewGraphic = (entry, options) => {
 
 const animatePreviewGraphic = (preview, deltaSeconds, elapsedSeconds) => {
   const gait = preview?.runtime?.gait
+  const claws = preview?.runtime?.claws
   if (Array.isArray(gait) && gait.length > 0) {
     gait.forEach((leg) => {
       leg.node.rotation = Math.sin(elapsedSeconds * 7.6 + leg.phase) * 0.22
-      leg.node.y = leg.node.position.y + Math.cos(elapsedSeconds * 9.2 + leg.phase) * 0.9
+    })
+    claws?.forEach((claw) => {
+      claw.node.rotation = Math.sin(elapsedSeconds * 5.8 + claw.phase) * 0.18
     })
     preview.y = 10 + Math.sin(elapsedSeconds * 2.4) * 4
   }

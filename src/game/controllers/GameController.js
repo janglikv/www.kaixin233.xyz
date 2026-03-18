@@ -141,11 +141,16 @@ const createEnemyDisplayFactory = ({ PIXI, renderer, entry, scale }) => {
           display: ship,
           updateAnimation(deltaSeconds, elapsedSeconds, speedRatio = 1) {
             const gait = ship.runtime?.gait ?? []
+            const claws = ship.runtime?.claws ?? []
             gait.forEach((leg) => {
               leg.node.rotation =
                 Math.sin(elapsedSeconds * (7.5 + speedRatio * 4) + leg.phase) *
                 (0.08 + speedRatio * 0.12)
-              leg.node.y = leg.node.position.y + Math.cos(elapsedSeconds * 10 + leg.phase) * 0.6
+            })
+            claws.forEach((claw) => {
+              claw.node.rotation =
+                Math.sin(elapsedSeconds * (5.2 + speedRatio * 2.4) + claw.phase) *
+                (0.1 + speedRatio * 0.08)
             })
           },
         }
