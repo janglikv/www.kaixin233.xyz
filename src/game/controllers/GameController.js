@@ -5,6 +5,7 @@ import { RiftServitorSwarm } from '../enemies/RiftServitorSwarm'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
+import { createGameSceneRuntime } from '../runtime/createGameSceneRuntime'
 import { clampExhaustIndex, createPlayerCombatRuntime } from '../runtime/createPlayerCombatRuntime'
 import { BattleOverlayController } from '../ui/BattleOverlayController'
 import { GameOverOverlayController } from '../ui/GameOverOverlayController'
@@ -131,8 +132,6 @@ export class GameController {
 
     this.container.appendChild(app.canvas)
 
-    const gameLayer = new PIXI.Container()
-    app.stage.addChild(gameLayer)
     const persistedSettings = normalizeGameSettings(
       loadGameSettings({
         ...GAME_SETTINGS_DEFAULTS,
@@ -146,13 +145,14 @@ export class GameController {
     const initialEquippedExhaustIndex = getExhaustIndexByItemId(
       persistedSettings.equippedExhaustItemId,
     )
-    let layoutScale = 1
-    let layoutOffsetX = 0
-    let layoutOffsetY = 0
-
-    const worldLayer = new PIXI.Container()
-    const gameOverLayer = new PIXI.Container()
-    const worldMask = new PIXI.Graphics()
+    const sceneRuntime = createGameSceneRuntime({
+      app,
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+      worldInset: WORLD_INSET,
+      worldRadius: WORLD_RADIUS,
+    })
+    const { gameLayer, worldLayer, gameOverLayer } = sceneRuntime
     const playerHealth = {
       current: PLAYER_MAX_HEALTH,
       max: PLAYER_MAX_HEALTH,
@@ -164,16 +164,6 @@ export class GameController {
       attackSpeed: persistedSettings.attackSpeed,
       critChance: persistedSettings.critChance,
     }
-    worldMask
-      .roundRect(
-        WORLD_INSET,
-        WORLD_INSET,
-        LOGICAL_WIDTH - WORLD_INSET * 2,
-        LOGICAL_HEIGHT - WORLD_INSET * 2,
-        WORLD_RADIUS,
-      )
-      .fill(0xffffff)
-    worldLayer.mask = worldMask
 
     const spaceBackdrop = createSpaceBackdrop({
       width: LOGICAL_WIDTH,
@@ -314,14 +304,10 @@ export class GameController {
     const pointer = createPointerController(app.canvas, {
       shouldStart: (event) => {
         const rect = app.canvas.getBoundingClientRect()
-        const logicalX = (event.clientX - rect.left - layoutOffsetX) / layoutScale
-        const logicalY = (event.clientY - rect.top - layoutOffsetY) / layoutScale
-        return !overlayController.containsInteractive(logicalX, logicalY)
+        const point = sceneRuntime.toLogicalPoint(event.clientX, event.clientY, rect)
+        return !overlayController.containsInteractive(point.x, point.y)
       },
     })
-    gameLayer.addChild(worldLayer)
-    gameLayer.addChild(worldMask)
-    gameLayer.addChild(gameOverLayer)
 
     overlayController = new BattleOverlayController({
       gameLayer,
@@ -413,18 +399,6 @@ export class GameController {
     let fpsSampleElapsed = 0
     let fpsFrameCount = 0
 
-    const layout = () => {
-      layoutScale = Math.min(
-        app.renderer.width / LOGICAL_WIDTH,
-        app.renderer.height / LOGICAL_HEIGHT,
-      )
-      layoutOffsetX = (app.renderer.width - LOGICAL_WIDTH * layoutScale) * 0.5
-      layoutOffsetY = (app.renderer.height - LOGICAL_HEIGHT * layoutScale) * 0.5
-
-      gameLayer.scale.set(layoutScale)
-      gameLayer.position.set(layoutOffsetX, layoutOffsetY)
-    }
-
     const tick = (ticker) => {
       const rawDeltaSeconds = ticker.deltaMS / 1000
       fpsSampleElapsed += rawDeltaSeconds
@@ -468,9 +442,9 @@ export class GameController {
       gameOverOverlay.setProgress(gameOverFadeProgress)
     }
 
-    app.renderer.on('resize', layout)
+    app.renderer.on('resize', sceneRuntime.layout)
     app.ticker.add(tick)
-    layout()
+    sceneRuntime.layout()
 
     this.cleanupFn = () => {
       if (disposed) return
@@ -480,7 +454,7 @@ export class GameController {
         this.app = null
       }
 
-      app.renderer.off('resize', layout)
+      app.renderer.off('resize', sceneRuntime.layout)
       app.ticker.remove(tick)
       app.canvas.removeEventListener('pointerdown', unlockAudio)
       window.removeEventListener('game-settings-changed', syncFromStorage)
