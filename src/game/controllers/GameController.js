@@ -6,10 +6,13 @@ import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { createGameSceneRuntime } from '../runtime/createGameSceneRuntime'
+import {
+  createGameSettingsNormalizer,
+  createGameSettingsSession,
+} from '../runtime/createGameSettingsSession'
 import { clampExhaustIndex, createPlayerCombatRuntime } from '../runtime/createPlayerCombatRuntime'
 import { BattleOverlayController } from '../ui/BattleOverlayController'
 import { GameOverOverlayController } from '../ui/GameOverOverlayController'
-import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
 
@@ -42,10 +45,6 @@ const GAME_SETTINGS_DEFAULTS = {
   critChance: PLAYER_STATS.critChance,
   exhaustIndex: 0,
 }
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
-const clampAttackPower = (value) => clamp(Math.round(value), 1, 999)
-const clampAttackSpeed = (value) => clamp(Math.round(value * 10) / 10, 1, 30)
-const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
 const getShipThemeByItemId = (itemId) => {
   if (typeof itemId !== 'string') return SHIP_CATALOG[0]?.theme
   const serial = Number(itemId.replace('ship-frame-', ''))
@@ -58,26 +57,6 @@ const getExhaustIndexByItemId = (itemId) => {
   const index = Number(itemId.replace('exhaust-', ''))
   return clampExhaustIndex(index)
 }
-
-const normalizeGameSettings = (settings) => ({
-  gameStarted: settings.gameStarted !== false,
-  pressureTestEnabled: settings.pressureTestEnabled === true,
-  equippedShipItemId:
-    typeof settings.equippedShipItemId === 'string' ? settings.equippedShipItemId : SHIP_DEFAULT_ITEM_ID,
-  equippedExhaustItemId:
-    typeof settings.equippedExhaustItemId === 'string'
-      ? settings.equippedExhaustItemId
-      : EXHAUST_0_ITEM_ID,
-  musicEnabled: Boolean(settings.musicEnabled),
-  fpsEnabled: settings.fpsEnabled !== false,
-  impactEffectsEnabled: settings.impactEffectsEnabled !== false,
-  catalogVisible: settings.catalogVisible === true,
-  catalogPreviewCode: typeof settings.catalogPreviewCode === 'string' ? settings.catalogPreviewCode : null,
-  attackPower: clampAttackPower(settings.attackPower),
-  attackSpeed: clampAttackSpeed(settings.attackSpeed),
-  critChance: clampCritChance(settings.critChance),
-  exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
-})
 
 const createEmptyEnemyFormation = () => ({
   getHitboxes() {
@@ -132,12 +111,20 @@ export class GameController {
 
     this.container.appendChild(app.canvas)
 
-    const persistedSettings = normalizeGameSettings(
-      loadGameSettings({
+    const normalizeGameSettings = createGameSettingsNormalizer({
+      shipDefaultItemId: SHIP_DEFAULT_ITEM_ID,
+      exhaustDefaultItemId: EXHAUST_0_ITEM_ID,
+      clampExhaustIndex,
+    })
+    const settingsSession = createGameSettingsSession({
+      defaults: {
         ...GAME_SETTINGS_DEFAULTS,
         exhaustIndex: clampExhaustIndex(this.pluginIndex),
-      }),
-    )
+      },
+      normalize: normalizeGameSettings,
+      getExhaustIndexByItemId,
+    })
+    const persistedSettings = settingsSession.getState()
     const audio = createSynthAudio()
     audio.setMusicEnabled(persistedSettings.musicEnabled)
     audio.resetRunState()
@@ -232,41 +219,11 @@ export class GameController {
       },
     })
     const keyboard = createKeyboardController()
-    let isCatalogVisible = persistedSettings.catalogVisible === true
-    let activeCatalogPreviewCode = persistedSettings.catalogPreviewCode
-    let isPressureTestEnabled = persistedSettings.pressureTestEnabled
-    let isFpsVisible = persistedSettings.fpsEnabled
     let currentExhaustIndex = initialEquippedExhaustIndex
-    const buildSettingsSnapshot = (overrides = {}) =>
-      normalizeGameSettings({
-        gameStarted: true,
-        pressureTestEnabled: isPressureTestEnabled,
-        equippedShipItemId: persistedSettings.equippedShipItemId,
-        equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
-        musicEnabled: audio.isMusicEnabled(),
-        fpsEnabled: isFpsVisible,
-        impactEffectsEnabled: isImpactEffectsEnabled,
-        attackPower: playerStats.attackPower,
-        attackSpeed: playerStats.attackSpeed,
-        critChance: playerStats.critChance,
-        exhaustIndex: currentExhaustIndex,
-        catalogVisible: isCatalogVisible,
-        catalogPreviewCode: activeCatalogPreviewCode,
-        ...overrides,
-      })
     const syncFromStorage = () => {
-      const nextSettings = normalizeGameSettings(
-        loadGameSettings({
-          ...GAME_SETTINGS_DEFAULTS,
-          exhaustIndex: currentExhaustIndex,
-        }),
-      )
-      isPressureTestEnabled = nextSettings.pressureTestEnabled
-      isFpsVisible = nextSettings.fpsEnabled
+      const nextSettings = settingsSession.reload()
       isImpactEffectsEnabled = nextSettings.impactEffectsEnabled
       currentExhaustIndex = getExhaustIndexByItemId(nextSettings.equippedExhaustItemId)
-      isCatalogVisible = nextSettings.catalogVisible === true
-      activeCatalogPreviewCode = nextSettings.catalogPreviewCode
       playerStats.attackPower = nextSettings.attackPower
       playerStats.attackSpeed = nextSettings.attackSpeed
       playerStats.critChance = nextSettings.critChance
@@ -279,24 +236,24 @@ export class GameController {
       })
       overlayController?.updateStats(playerStats)
       overlayController?.syncFromState({
-        isCatalogVisible,
-        activeCatalogPreviewCode,
-        isFpsVisible,
-        settingsState: getSettingsOverlayState(),
+        isCatalogVisible: nextSettings.catalogVisible === true,
+        activeCatalogPreviewCode: nextSettings.catalogPreviewCode,
+        isFpsVisible: nextSettings.fpsEnabled,
+        settingsState: settingsSession.getOverlayState(),
       })
     }
-    const persistSettings = () => {
-      saveGameSettings(buildSettingsSnapshot())
-    }
-    const getSettingsOverlayState = () => ({
-      pressureTestEnabled: isPressureTestEnabled,
-      musicEnabled: audio.isMusicEnabled(),
-      fpsEnabled: isFpsVisible,
-      impactEffectsEnabled: isImpactEffectsEnabled,
-      attackPower: playerStats.attackPower,
-      attackSpeed: playerStats.attackSpeed,
-      critChance: playerStats.critChance,
-    })
+    const persistSettings = (patch = {}) =>
+      settingsSession.persist({
+        gameStarted: true,
+        musicEnabled: audio.isMusicEnabled(),
+        impactEffectsEnabled: isImpactEffectsEnabled,
+        attackPower: playerStats.attackPower,
+        attackSpeed: playerStats.attackSpeed,
+        critChance: playerStats.critChance,
+        equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
+        ...patch,
+      })
+    const getSettingsOverlayState = () => settingsSession.getOverlayState()
     const unlockAudio = () => {
       audio.unlock()
     }
@@ -316,51 +273,66 @@ export class GameController {
       entries: CATALOG_ENTRIES,
       playerStats,
       playerHealth,
-      initialCatalogVisible: isCatalogVisible,
-      initialCatalogPreviewCode: activeCatalogPreviewCode,
-      initialFpsVisible: isFpsVisible,
+      initialCatalogVisible: persistedSettings.catalogVisible === true,
+      initialCatalogPreviewCode: persistedSettings.catalogPreviewCode,
+      initialFpsVisible: persistedSettings.fpsEnabled,
       getSettingsState: getSettingsOverlayState,
       onUiClick: (options) => audio.playUiClick(options),
       onPreviewOpen: (code) => {
-        activeCatalogPreviewCode = code
-        persistSettings()
+        persistSettings({
+          catalogVisible: true,
+          catalogPreviewCode: code,
+        })
       },
       onPreviewClose: () => {
-        activeCatalogPreviewCode = null
-        persistSettings()
+        persistSettings({
+          catalogPreviewCode: null,
+        })
       },
       onCatalogClose: () => {
-        isCatalogVisible = false
-        activeCatalogPreviewCode = null
-        persistSettings()
+        persistSettings({
+          catalogVisible: false,
+          catalogPreviewCode: null,
+        })
       },
       onMusicToggle: (enabled) => {
         audio.setMusicEnabled(enabled)
         if (enabled) {
           audio.playUiClick({ high: true })
         }
-        persistSettings()
+        persistSettings({
+          musicEnabled: enabled,
+        })
       },
       onFpsToggle: (enabled) => {
         audio.playUiClick({ high: enabled })
-        isFpsVisible = enabled
-        persistSettings()
+        persistSettings({
+          fpsEnabled: enabled,
+        })
       },
       onImpactEffectsToggle: (enabled) => {
         audio.playUiClick({ high: enabled })
         isImpactEffectsEnabled = enabled
-        persistSettings()
+        persistSettings({
+          impactEffectsEnabled: enabled,
+        })
       },
       onAdjustStat: (key, direction) => {
         audio.playUiClick({ high: direction > 0 })
         if (key === 'attackPower') {
-          playerStats.attackPower = clampAttackPower(playerStats.attackPower + direction)
+          playerStats.attackPower = normalizeGameSettings({
+            attackPower: playerStats.attackPower + direction,
+          }).attackPower
         }
         if (key === 'attackSpeed') {
-          playerStats.attackSpeed = clampAttackSpeed(playerStats.attackSpeed + direction * 0.5)
+          playerStats.attackSpeed = normalizeGameSettings({
+            attackSpeed: playerStats.attackSpeed + direction * 0.5,
+          }).attackSpeed
         }
         if (key === 'critChance') {
-          playerStats.critChance = clampCritChance(playerStats.critChance + direction * 0.05)
+          playerStats.critChance = normalizeGameSettings({
+            critChance: playerStats.critChance + direction * 0.05,
+          }).critChance
         }
         playerCombat.syncSettings({
           attackPower: playerStats.attackPower,
@@ -372,25 +344,24 @@ export class GameController {
         persistSettings()
       },
       onCatalogOpen: (visible) => {
-        isCatalogVisible = visible
-        if (!visible) {
-          activeCatalogPreviewCode = null
-        }
-        persistSettings()
+        persistSettings({
+          catalogVisible: visible,
+          catalogPreviewCode: visible ? settingsSession.getState().catalogPreviewCode : null,
+        })
       },
       onClearData: () => {
-        clearGameSettings()
+        settingsSession.clear()
       },
       onEnterDebugScene: () => {
-        saveGameSettings(buildSettingsSnapshot({
+        persistSettings({
           gameStarted: true,
           pressureTestEnabled: true,
-        }))
+        })
       },
       onLeave: () => {
-        saveGameSettings(buildSettingsSnapshot({
+        persistSettings({
           gameStarted: false,
-        }))
+        })
       },
     })
     window.addEventListener('game-settings-changed', syncFromStorage)
