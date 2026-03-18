@@ -2,15 +2,15 @@ import * as PIXI from 'pixi.js'
 import { createSynthAudio } from '../audio/createSynthAudio'
 import { createBulletSystem } from '../effects/createBulletSystem'
 import { CATALOG_ENTRIES } from '../data/catalogEntries'
+import { RiftServitorSwarm } from '../enemies/RiftServitorSwarm'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
 import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
 import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
-import { createCatalogOverlay, createVoidCreaturePreview } from '../renderers/createCatalogOverlay'
+import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
 import { createPlayerHealthBar } from '../renderers/createPlayerHealthBar'
 import { createSettingsButton } from '../renderers/createSettingsButton'
-import { createShip } from '../renderers/createShip'
 import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
 import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
@@ -19,7 +19,7 @@ import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
-import { createEcsWorld, createEntity, queryEntities } from '../ecs/createEcsWorld'
+import { createEcsWorld, createEntity } from '../ecs/createEcsWorld'
 import { ecsSystemRegistry } from '../ecs/ecsSystemRegistry'
 
 const LOGICAL_WIDTH = 1280
@@ -33,28 +33,8 @@ const SHIP_BOUND_HALF_WIDTH = 46 * SHIP_SCALE
 const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const WORLD_RADIUS = 0
-const NORMAL_ENEMY_COLUMNS = 4
-const NORMAL_ENEMY_ROWS = 3
-const NORMAL_ENEMY_ENTRY_CODE = '#10'
-const NORMAL_ENEMY_SCALE = 0.96
-const NORMAL_ENEMY_HEALTH = 1
-const NORMAL_ENEMY_COLLISION_RADIUS = 38
 const NORMAL_ENEMY_SPAWN_X = LOGICAL_WIDTH * 0.5
 const NORMAL_ENEMY_SPAWN_Y = -92
-const NORMAL_ENEMY_SPEED = 112
-const NORMAL_ENEMY_COMMIT_SPEED = 228
-const NORMAL_ENEMY_SPAWN_INTERVAL = 1.08
-const NORMAL_ENEMY_RECYCLE_BUFFER = 120
-const NORMAL_ENEMY_CONTACT_DAMAGE = 3
-const NORMAL_ENEMY_TRACK_DISTANCE = 600
-const NORMAL_ENEMY_COMMIT_DISTANCE = 220
-const NORMAL_ENEMY_EXPLODE_DISTANCE = 96
-const NORMAL_ENEMY_COMMIT_MAX_DURATION = 1
-const ENEMY_SPATIAL_CELL_SIZE = 80
-const ENEMY_SEPARATION_WEIGHT = 0.9
-const NORMAL_ENEMY_TRACK_UPDATE_CHANCE = 0.08
-const NORMAL_ENEMY_MAX_TURN_RATE = Math.PI * 0.9
-const NORMAL_ENEMY_TURN_SMOOTHING = 0.22
 const PLAYER_MAX_HEALTH = 10
 const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
@@ -100,16 +80,6 @@ const getExhaustIndexByItemId = (itemId) => {
   return clampExhaustIndex(index)
 }
 
-const getSpatialCellKey = (x, y, cellSize) =>
-  `${Math.floor(x / cellSize)},${Math.floor(y / cellSize)}`
-
-const normalizeAngleDelta = (angle) => {
-  let nextAngle = angle
-  while (nextAngle > Math.PI) nextAngle -= Math.PI * 2
-  while (nextAngle < -Math.PI) nextAngle += Math.PI * 2
-  return nextAngle
-}
-
 const normalizeGameSettings = (settings) => ({
   gameStarted: settings.gameStarted !== false,
   pressureTestEnabled: settings.pressureTestEnabled === true,
@@ -129,376 +99,6 @@ const normalizeGameSettings = (settings) => ({
   critChance: clampCritChance(settings.critChance),
   exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
 })
-
-const createEnemyDisplayFactory = ({ PIXI, renderer, entry, scale }) => {
-  if (entry?.previewKind === 'void-creature') {
-    return {
-      createDisplay() {
-        const ship = createVoidCreaturePreview(entry, { withGlow: false })
-        ship.scale.set(scale)
-        const bounds = ship.getLocalBounds()
-        ship.position.set(-bounds.x - bounds.width * 0.5, -bounds.y - bounds.height * 0.5)
-        return {
-          display: ship,
-          updateAnimation(deltaSeconds, elapsedSeconds, speedRatio = 1) {
-            const gait = ship.runtime?.gait ?? []
-            const claws = ship.runtime?.claws ?? []
-            gait.forEach((leg) => {
-              leg.node.rotation =
-                Math.sin(elapsedSeconds * (7.5 + speedRatio * 4) + leg.phase) *
-                (0.08 + speedRatio * 0.12)
-            })
-            claws.forEach((claw) => {
-              claw.node.rotation =
-                Math.sin(elapsedSeconds * (5.2 + speedRatio * 2.4) + claw.phase) *
-                (0.1 + speedRatio * 0.08)
-            })
-          },
-        }
-      },
-      destroy() {},
-    }
-  }
-
-  const { ship, flameGlow, flameCore, flameInner } = createShip(entry?.theme)
-  flameGlow.visible = false
-  flameCore.visible = false
-  flameInner.visible = false
-  ship.rotation = Math.PI
-  ship.scale.set(scale)
-
-  const bounds = ship.getLocalBounds()
-  ship.position.set(-bounds.x, -bounds.y)
-
-  const wrapper = new PIXI.Container()
-  wrapper.addChild(ship)
-  const texture = renderer.generateTexture(wrapper)
-
-  return {
-    createDisplay() {
-      const sprite = new PIXI.Sprite(texture)
-      sprite.anchor.set(-bounds.x / bounds.width, -bounds.y / bounds.height)
-      return {
-        display: sprite,
-        updateAnimation() {},
-      }
-    },
-    destroy() {
-      texture.destroy(true)
-    },
-  }
-}
-
-const createEnemyFormation = ({ PIXI, renderer, parent }) => {
-  const world = createEcsWorld()
-  const activeHitboxes = []
-  const enemyCatalogEntry = CATALOG_ENTRIES.find((entry) => entry.code === NORMAL_ENEMY_ENTRY_CODE)
-  const enemyDisplayFactory = createEnemyDisplayFactory({
-    PIXI,
-    renderer,
-    entry: enemyCatalogEntry,
-    scale: NORMAL_ENEMY_SCALE,
-  })
-  const bottomLimit = LOGICAL_HEIGHT + NORMAL_ENEMY_RECYCLE_BUFFER
-  let formationElapsed = 0
-
-  const syncEnemySprite = (entityId) => {
-    const position = world.components.position.get(entityId)
-    const sprite = world.links.sprite.get(entityId)
-    if (!position || !sprite) return
-    sprite.position.set(position.x, position.y)
-  }
-
-  for (let rowIndex = 0; rowIndex < NORMAL_ENEMY_ROWS; rowIndex += 1) {
-    for (let columnIndex = 0; columnIndex < NORMAL_ENEMY_COLUMNS; columnIndex += 1) {
-      const spawnOrder = rowIndex * NORMAL_ENEMY_COLUMNS + columnIndex
-      const x = NORMAL_ENEMY_SPAWN_X
-      const y = NORMAL_ENEMY_SPAWN_Y
-      const enemyId = createEntity(world)
-      const enemyDisplay = enemyDisplayFactory.createDisplay()
-      const sprite = enemyDisplay.display
-      sprite.position.set(x, y)
-      sprite.visible = false
-
-      parent.addChild(sprite)
-      const hitbox = {
-        left: x - 24,
-        right: x + 24,
-        top: y - 30,
-        bottom: y + 28,
-        id: enemyId,
-        centerX: x,
-        centerY: y + 8,
-        health: NORMAL_ENEMY_HEALTH,
-      }
-      world.components.position.set(enemyId, { x, y })
-      world.components.velocity.set(enemyId, { x: 0, y: 0 })
-      world.components.health.set(enemyId, { current: NORMAL_ENEMY_HEALTH })
-      world.components.enemy.set(enemyId, {
-        id: enemyId,
-        columnIndex,
-        active: false,
-        commit: false,
-        commitElapsed: 0,
-        seekDirectionX: 0,
-        seekDirectionY: 1,
-        moveDirectionX: 0,
-        moveDirectionY: 1,
-        commitDirectionX: 0,
-        commitDirectionY: 1,
-        spawnTime: spawnOrder * NORMAL_ENEMY_SPAWN_INTERVAL,
-        collisionRadius: NORMAL_ENEMY_COLLISION_RADIUS,
-        hitboxHalfWidth: 24,
-        hitboxTopOffset: 30,
-        hitboxBottomOffset: 28,
-        hitboxCenterYOffset: 8,
-      })
-      world.components.hitbox.set(enemyId, hitbox)
-      world.links.sprite.set(enemyId, sprite)
-      world.links.runtime.set(enemyId, enemyDisplay)
-      syncEnemySprite(enemyId)
-      hitbox.health = NORMAL_ENEMY_HEALTH
-      activeHitboxes.push(hitbox)
-    }
-  }
-
-  const findEnemyEntity = (enemyId) =>
-    queryEntities(world, ['enemy']).find((entityId) => world.components.enemy.get(entityId)?.id === enemyId)
-
-  return {
-    getHitboxes() {
-      activeHitboxes.length = 0
-      queryEntities(world, ['enemy', 'health', 'hitbox']).forEach((entityId) => {
-        const health = world.components.health.get(entityId)
-        const hitbox = world.components.hitbox.get(entityId)
-        if (health?.current > 0 && hitbox) {
-          activeHitboxes.push(hitbox)
-        }
-      })
-      return activeHitboxes
-    },
-    getShooters() {
-      return []
-    },
-    applyDamage(enemyId, damage) {
-      const entityId = findEnemyEntity(enemyId)
-      if (!entityId) {
-        return null
-      }
-
-      const enemy = world.components.enemy.get(entityId)
-      const position = world.components.position.get(entityId)
-      const health = world.components.health.get(entityId)
-      const hitbox = world.components.hitbox.get(entityId)
-      const sprite = world.links.sprite.get(entityId)
-
-      if (!enemy || !position || !health || !hitbox || !sprite || health.current <= 0) {
-        return null
-      }
-
-      const previousHealth = health.current
-      health.current = Math.max(0, health.current - damage)
-      hitbox.health = health.current
-      const alive = health.current > 0
-      const died = previousHealth > 0 && !alive
-      if (died) {
-        sprite.visible = false
-      }
-
-      const hitResult = {
-        id: enemy.id,
-        alive,
-        died,
-        health: health.current,
-        x: position.x,
-        y: position.y + enemy.hitboxCenterYOffset,
-      }
-
-      return hitResult
-    },
-    update(deltaSeconds, seekTarget = null, onPlayerCollision = () => {}) {
-      formationElapsed += deltaSeconds
-      const activeEnemies = []
-      queryEntities(world, ['position', 'velocity', 'enemy', 'health', 'hitbox']).forEach((entityId) => {
-        const position = world.components.position.get(entityId)
-        const velocity = world.components.velocity.get(entityId)
-        const enemy = world.components.enemy.get(entityId)
-        const health = world.components.health.get(entityId)
-        const hitbox = world.components.hitbox.get(entityId)
-        const sprite = world.links.sprite.get(entityId)
-        const runtime = world.links.runtime.get(entityId)
-
-        if (!position || !velocity || !enemy || !health || !hitbox || !sprite || !runtime) return
-        if (health.current <= 0) return
-        if (!enemy.active) {
-          if (formationElapsed < enemy.spawnTime) return
-          enemy.active = true
-          enemy.moveDirectionX = 0
-          enemy.moveDirectionY = 1
-          sprite.visible = true
-        }
-        activeEnemies.push({
-          entityId,
-          position,
-          velocity,
-          enemy,
-          health,
-          hitbox,
-          sprite,
-          runtime,
-        })
-      })
-
-      const spatialGrid = new Map()
-      activeEnemies.forEach((item) => {
-        const key = getSpatialCellKey(item.position.x, item.position.y, ENEMY_SPATIAL_CELL_SIZE)
-        const bucket = spatialGrid.get(key)
-        if (bucket) {
-          bucket.push(item)
-          return
-        }
-        spatialGrid.set(key, [item])
-      })
-
-      activeEnemies.forEach((item) => {
-        const { entityId, position, velocity, enemy, health, hitbox, sprite, runtime } = item
-
-        const rawTargetX = seekTarget?.x ?? LOGICAL_WIDTH * 0.5
-        const rawTargetY = seekTarget?.y ?? LOGICAL_HEIGHT * 0.75
-        const toTargetX = rawTargetX - position.x
-        const toTargetY = rawTargetY - position.y
-        let deltaX = toTargetX
-        let deltaY = toTargetY
-        let targetDistance = Math.hypot(toTargetX, toTargetY)
-        const trackingTarget =
-          seekTarget && targetDistance <= NORMAL_ENEMY_TRACK_DISTANCE ? seekTarget : null
-        const cellX = Math.floor(position.x / ENEMY_SPATIAL_CELL_SIZE)
-        const cellY = Math.floor(position.y / ENEMY_SPATIAL_CELL_SIZE)
-        let separationX = 0
-        let separationY = 0
-
-        for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
-          for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
-            const neighborBucket = spatialGrid.get(`${cellX + offsetX},${cellY + offsetY}`)
-            if (!neighborBucket) continue
-
-            neighborBucket.forEach((neighbor) => {
-              if (neighbor.entityId === item.entityId) return
-              const offsetToNeighborX = position.x - neighbor.position.x
-              const offsetToNeighborY = position.y - neighbor.position.y
-              const minDistance =
-                (enemy.collisionRadius ?? NORMAL_ENEMY_COLLISION_RADIUS) +
-                (neighbor.enemy.collisionRadius ?? NORMAL_ENEMY_COLLISION_RADIUS)
-              const distanceSquared =
-                offsetToNeighborX * offsetToNeighborX + offsetToNeighborY * offsetToNeighborY
-              if (distanceSquared === 0 || distanceSquared >= minDistance * minDistance) return
-
-              const distance = Math.sqrt(distanceSquared)
-              const strength = ((minDistance - distance) / minDistance) * ENEMY_SEPARATION_WEIGHT
-              separationX += (offsetToNeighborX / distance) * strength
-              separationY += (offsetToNeighborY / distance) * strength
-            })
-          }
-        }
-
-        if (!enemy.commit && trackingTarget && targetDistance <= NORMAL_ENEMY_COMMIT_DISTANCE) {
-          enemy.commit = true
-          enemy.commitElapsed = 0
-          const commitLength = Math.hypot(toTargetX, toTargetY) || 1
-          enemy.commitDirectionX = toTargetX / commitLength
-          enemy.commitDirectionY = toTargetY / commitLength
-        }
-
-        if (enemy.commit) {
-          enemy.commitElapsed += deltaSeconds
-          if (enemy.commitElapsed >= NORMAL_ENEMY_COMMIT_MAX_DURATION) {
-            health.current = 0
-            hitbox.health = 0
-            sprite.visible = false
-            onPlayerCollision({
-              x: position.x,
-              y: position.y + enemy.hitboxCenterYOffset,
-              damage: 0,
-            })
-            return
-          }
-          deltaX = enemy.commitDirectionX
-          deltaY = enemy.commitDirectionY
-        } else {
-          const shouldRefreshSeek =
-            Math.random() < NORMAL_ENEMY_TRACK_UPDATE_CHANCE ||
-            (enemy.seekDirectionX === 0 && enemy.seekDirectionY === 1)
-          if (trackingTarget && shouldRefreshSeek) {
-            const seekLength = Math.hypot(toTargetX, toTargetY) || 1
-            enemy.seekDirectionX = toTargetX / seekLength
-            enemy.seekDirectionY = toTargetY / seekLength
-          }
-          const desiredDirectionX = enemy.seekDirectionX + separationX
-          const desiredDirectionY = enemy.seekDirectionY + separationY
-          const desiredLength = Math.hypot(desiredDirectionX, desiredDirectionY) || 1
-          const desiredAngle = Math.atan2(
-            desiredDirectionY / desiredLength,
-            desiredDirectionX / desiredLength,
-          )
-          const currentAngle = Math.atan2(enemy.moveDirectionY, enemy.moveDirectionX)
-          const angleDelta = normalizeAngleDelta(desiredAngle - currentAngle)
-          const smoothedAngleDelta = angleDelta * NORMAL_ENEMY_TURN_SMOOTHING
-          const maxTurnStep = NORMAL_ENEMY_MAX_TURN_RATE * deltaSeconds
-          const nextAngle =
-            currentAngle +
-            Math.max(
-              -maxTurnStep,
-              Math.min(maxTurnStep, smoothedAngleDelta),
-            )
-          enemy.moveDirectionX = Math.cos(nextAngle)
-          enemy.moveDirectionY = Math.sin(nextAngle)
-          deltaX = enemy.moveDirectionX
-          deltaY = enemy.moveDirectionY
-        }
-
-        const length = enemy.commit ? 1 : Math.hypot(deltaX, deltaY) || 1
-        const speed = enemy.commit ? NORMAL_ENEMY_COMMIT_SPEED : NORMAL_ENEMY_SPEED
-        velocity.x = (deltaX / length) * speed
-        velocity.y = (deltaY / length) * speed
-        position.x += velocity.x * deltaSeconds
-        position.y += velocity.y * deltaSeconds
-        sprite.rotation = Math.atan2(velocity.y, velocity.x) - Math.PI * 0.5
-
-        if (targetDistance <= NORMAL_ENEMY_EXPLODE_DISTANCE) {
-          health.current = 0
-          hitbox.health = 0
-          sprite.visible = false
-          onPlayerCollision({
-            x: position.x,
-            y: position.y + enemy.hitboxCenterYOffset,
-            damage: NORMAL_ENEMY_CONTACT_DAMAGE,
-          })
-          return
-        }
-
-        if (position.y > bottomLimit) {
-          health.current = 0
-          hitbox.health = 0
-          sprite.visible = false
-          return
-        }
-
-        hitbox.left = position.x - enemy.hitboxHalfWidth
-        hitbox.right = position.x + enemy.hitboxHalfWidth
-        hitbox.top = position.y - enemy.hitboxTopOffset
-        hitbox.bottom = position.y + enemy.hitboxBottomOffset
-        hitbox.centerX = position.x
-        hitbox.centerY = position.y + enemy.hitboxCenterYOffset
-        hitbox.health = health.current
-        syncEnemySprite(entityId)
-        runtime.updateAnimation(deltaSeconds, formationElapsed, speed / NORMAL_ENEMY_COMMIT_SPEED)
-      })
-    },
-    destroy() {
-      enemyDisplayFactory.destroy()
-    },
-  }
-}
 
 const createGameplayWorld = ({ shipScene }) => {
   const world = createEcsWorld()
@@ -654,10 +254,14 @@ export class GameController {
     })
     const gameplayWorld = createGameplayWorld({ shipScene })
     const enemyFormation = this.spawnEnemies
-      ? createEnemyFormation({
-          PIXI,
-          renderer: app.renderer,
+      ? new RiftServitorSwarm({
           parent: worldLayer,
+          columns: 4,
+          rows: 3,
+          spawnX: NORMAL_ENEMY_SPAWN_X,
+          spawnY: NORMAL_ENEMY_SPAWN_Y,
+          spawnInterval: 1.08,
+          worldHeight: LOGICAL_HEIGHT,
         })
       : createEmptyEnemyFormation()
     const impactEffectSystem = createImpactEffectSystem(worldLayer)
