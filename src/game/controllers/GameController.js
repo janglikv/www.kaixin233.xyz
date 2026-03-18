@@ -51,7 +51,7 @@ const ENEMY_BULLET_DAMAGE = 5
 const GAME_OVER_FADE_TIME = 1.2
 const PLAYER_STATS = {
   attackPower: 1,
-  attackSpeed: 11.5,
+  attackSpeed: 2,
   critChance: 1,
 }
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
@@ -434,12 +434,11 @@ export class GameController {
       .fill(0xffffff)
     worldLayer.mask = worldMask
 
-    worldLayer.addChild(
-      createSpaceBackdrop({
-        width: LOGICAL_WIDTH,
-        height: LOGICAL_HEIGHT,
-      }),
-    )
+    const spaceBackdrop = createSpaceBackdrop({
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+    })
+    worldLayer.addChild(spaceBackdrop)
 
     const shipScene = createShipScene({
       x: LOGICAL_WIDTH * 0.5,
@@ -912,6 +911,7 @@ export class GameController {
           gameOverFadeProgress + deltaSeconds / GAME_OVER_FADE_TIME,
         )
       }
+      spaceBackdrop.update?.(deltaSeconds)
       const axis = gameOver ? { horizontal: 0, vertical: 0 } : keyboard.getAxis()
       gameplayWorld.updatePlayer(deltaSeconds, axis)
       const playerPosition = gameplayWorld.getPlayerPosition()

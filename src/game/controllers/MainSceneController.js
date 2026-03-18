@@ -31,7 +31,7 @@ const LOGICAL_WIDTH = 1280
 const LOGICAL_HEIGHT = 720
 const PLAYER_STATS = {
   attackPower: 1,
-  attackSpeed: 11.5,
+  attackSpeed: 2,
   critChance: 1,
 }
 const GAME_SETTINGS_DEFAULTS = {
@@ -906,12 +906,11 @@ export class MainSceneController {
       )
     }
 
-    gameLayer.addChild(
-      createSpaceBackdrop({
-        width: LOGICAL_WIDTH,
-        height: LOGICAL_HEIGHT,
-      }),
-    )
+    const spaceBackdrop = createSpaceBackdrop({
+      width: LOGICAL_WIDTH,
+      height: LOGICAL_HEIGHT,
+    })
+    gameLayer.addChild(spaceBackdrop)
 
     const previewPanel = createShipPreviewPanel({
       x: 794,
@@ -1087,6 +1086,7 @@ export class MainSceneController {
     const tick = (ticker) => {
       const deltaSeconds = ticker.deltaMS / 1000
       animationTime += deltaSeconds
+      spaceBackdrop.update?.(deltaSeconds)
       const pulse = (Math.sin(animationTime * 3.1) + 1) * 0.5
       previewPanel.update(deltaSeconds, animationTime, pulse)
       previewPanel.shipScene.shipGroup.y = Math.sin(animationTime * 1.5) * 6
