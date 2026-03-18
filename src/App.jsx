@@ -57,11 +57,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    const handleSettingsChanged = (event) => {
-      const nextState = {
-        gameStarted: event?.detail?.gameStarted === true,
-        pressureTestEnabled: event?.detail?.pressureTestEnabled === true,
-      }
+    const handleSettingsChanged = () => {
+      const nextState = getSceneState()
       setSceneState((currentState) =>
         currentState.gameStarted === nextState.gameStarted &&
         currentState.pressureTestEnabled === nextState.pressureTestEnabled

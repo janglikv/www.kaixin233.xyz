@@ -336,6 +336,15 @@ export const createSettingsOverlay = ({
 
   const bg = new PIXI.Graphics()
   bg.rect(0, 0, width, height).fill({ color: 0x050a15, alpha: 0.96 })
+  bg.eventMode = 'static'
+  bg.cursor = 'default'
+  bg.hitArea = new PIXI.Rectangle(0, 0, width, height)
+  bg.on('pointerdown', (event) => {
+    event.stopPropagation()
+  })
+  bg.on('pointertap', (event) => {
+    event.stopPropagation()
+  })
   container.addChild(bg)
 
   const closeBg = new PIXI.Graphics()

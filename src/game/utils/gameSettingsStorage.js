@@ -1,42 +1,110 @@
-const STORAGE_KEY = 'kaixin233-game-settings'
+const LEGACY_STORAGE_KEY = 'kaixin233-game-settings'
+const STORAGE_KEY_PREFIX = 'kaixin233-game-setting'
+const STORAGE_KEYS = {
+  gameStarted: `${STORAGE_KEY_PREFIX}:gameStarted`,
+  pressureTestEnabled: `${STORAGE_KEY_PREFIX}:pressureTestEnabled`,
+  equippedShipItemId: `${STORAGE_KEY_PREFIX}:equippedShipItemId`,
+  equippedExhaustItemId: `${STORAGE_KEY_PREFIX}:equippedExhaustItemId`,
+  musicEnabled: `${STORAGE_KEY_PREFIX}:musicEnabled`,
+  fpsEnabled: `${STORAGE_KEY_PREFIX}:fpsEnabled`,
+  impactEffectsEnabled: `${STORAGE_KEY_PREFIX}:impactEffectsEnabled`,
+  attackPower: `${STORAGE_KEY_PREFIX}:attackPower`,
+  attackSpeed: `${STORAGE_KEY_PREFIX}:attackSpeed`,
+  critChance: `${STORAGE_KEY_PREFIX}:critChance`,
+  exhaustIndex: `${STORAGE_KEY_PREFIX}:exhaustIndex`,
+}
 
-export const loadGameSettings = (fallbackSettings) => {
-  if (typeof window === 'undefined' || !window.localStorage) {
-    return { ...fallbackSettings }
-  }
+const readLegacySettings = () => {
+  const rawValue = window.localStorage.getItem(LEGACY_STORAGE_KEY)
+  if (!rawValue) return {}
 
   try {
-    const rawValue = window.localStorage.getItem(STORAGE_KEY)
-    if (!rawValue) {
-      return { ...fallbackSettings }
-    }
-
     const parsed = JSON.parse(rawValue)
-    if (!parsed || typeof parsed !== 'object') {
-      return { ...fallbackSettings }
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+const parseStoredValue = (rawValue) => {
+  if (rawValue == null) return undefined
+
+  try {
+    return JSON.parse(rawValue)
+  } catch {
+    return undefined
+  }
+}
+
+const readStoredGameSettings = () => {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return {}
+  }
+
+  const legacySettings = readLegacySettings()
+  const storedSettings = {}
+
+  Object.entries(STORAGE_KEYS).forEach(([settingKey, storageKey]) => {
+    const rawValue = window.localStorage.getItem(storageKey)
+    const parsedValue = parseStoredValue(rawValue)
+    if (parsedValue !== undefined) {
+      storedSettings[settingKey] = parsedValue
+      return
     }
 
-    return {
-      ...fallbackSettings,
-      ...parsed,
+    if (legacySettings[settingKey] !== undefined) {
+      storedSettings[settingKey] = legacySettings[settingKey]
     }
-  } catch {
-    return { ...fallbackSettings }
+  })
+
+  return storedSettings
+}
+
+const dispatchSettingsChanged = () => {
+  window.dispatchEvent(
+    new CustomEvent('game-settings-changed', {
+      detail: readStoredGameSettings(),
+    }),
+  )
+}
+
+export const loadGameSettings = (fallbackSettings = {}) => {
+  const storedSettings = readStoredGameSettings()
+
+  if (!fallbackSettings || typeof fallbackSettings !== 'object') {
+    return storedSettings
+  }
+
+  return {
+    ...fallbackSettings,
+    ...storedSettings,
   }
 }
 
 export const saveGameSettings = (settings) => {
-  if (typeof window === 'undefined' || !window.localStorage) {
+  if (
+    typeof window === 'undefined' ||
+    !window.localStorage ||
+    !settings ||
+    typeof settings !== 'object'
+  ) {
     return
   }
 
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
-    window.dispatchEvent(
-      new CustomEvent('game-settings-changed', {
-        detail: settings,
-      }),
-    )
+    Object.entries(settings).forEach(([settingKey, value]) => {
+      const storageKey = STORAGE_KEYS[settingKey]
+      if (!storageKey) return
+
+      if (value === undefined) {
+        window.localStorage.removeItem(storageKey)
+        return
+      }
+
+      window.localStorage.setItem(storageKey, JSON.stringify(value))
+    })
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY)
+    dispatchSettingsChanged()
   } catch {
     // Ignore write failures and keep the game playable.
   }
@@ -48,12 +116,11 @@ export const clearGameSettings = () => {
   }
 
   try {
-    window.localStorage.removeItem(STORAGE_KEY)
-    window.dispatchEvent(
-      new CustomEvent('game-settings-changed', {
-        detail: {},
-      }),
-    )
+    Object.values(STORAGE_KEYS).forEach((storageKey) => {
+      window.localStorage.removeItem(storageKey)
+    })
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY)
+    dispatchSettingsChanged()
   } catch {
     // Ignore write failures and keep the game playable.
   }

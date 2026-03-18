@@ -540,22 +540,42 @@ export class GameController {
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let isFpsVisible = persistedSettings.fpsEnabled
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
+    let equippedShipItemId = persistedSettings.equippedShipItemId
     let currentExhaustIndex = initialEquippedExhaustIndex
-    const persistSettings = () => {
-      saveGameSettings(
-        normalizeGameSettings({
-          ...loadGameSettings({}),
-          gameStarted: true,
-          pressureTestEnabled: isPressureTestEnabled,
-          musicEnabled: audio.isMusicEnabled(),
-          fpsEnabled: isFpsVisible,
-          impactEffectsEnabled: isImpactEffectsEnabled,
-          attackPower: playerStats.attackPower,
-          attackSpeed: playerStats.attackSpeed,
-          critChance: playerStats.critChance,
+    const buildSettingsSnapshot = (overrides = {}) =>
+      normalizeGameSettings({
+        gameStarted: true,
+        pressureTestEnabled: isPressureTestEnabled,
+        equippedShipItemId,
+        equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
+        musicEnabled: audio.isMusicEnabled(),
+        fpsEnabled: isFpsVisible,
+        impactEffectsEnabled: isImpactEffectsEnabled,
+        attackPower: playerStats.attackPower,
+        attackSpeed: playerStats.attackSpeed,
+        critChance: playerStats.critChance,
+        exhaustIndex: currentExhaustIndex,
+        ...overrides,
+      })
+    const syncFromStorage = () => {
+      const nextSettings = normalizeGameSettings(
+        loadGameSettings({
+          ...GAME_SETTINGS_DEFAULTS,
           exhaustIndex: currentExhaustIndex,
         }),
       )
+      isPressureTestEnabled = nextSettings.pressureTestEnabled
+      isFpsVisible = nextSettings.fpsEnabled
+      isImpactEffectsEnabled = nextSettings.impactEffectsEnabled
+      equippedShipItemId = nextSettings.equippedShipItemId
+      currentExhaustIndex = getExhaustIndexByItemId(nextSettings.equippedExhaustItemId)
+      audio.setMusicEnabled(nextSettings.musicEnabled)
+      fpsText.visible = isFpsVisible
+      exhaustSwitcher.setIndex(currentExhaustIndex)
+      settingsOverlay.update(getSettingsOverlayState())
+    }
+    const persistSettings = () => {
+      saveGameSettings(buildSettingsSnapshot())
     }
     const getSettingsOverlayState = () => ({
       pressureTestEnabled: isPressureTestEnabled,
@@ -642,8 +662,10 @@ export class GameController {
       height: LOGICAL_HEIGHT,
       state: getSettingsOverlayState(),
       onMusicToggle: (enabled) => {
-        audio.playUiClick({ high: enabled })
         audio.setMusicEnabled(enabled)
+        if (enabled) {
+          audio.playUiClick({ high: true })
+        }
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
       },
@@ -688,18 +710,16 @@ export class GameController {
       },
       onEnterDebugScene: () => {
         audio.playUiClick()
-        saveGameSettings({
-          ...loadGameSettings({}),
+        saveGameSettings(buildSettingsSnapshot({
           gameStarted: true,
           pressureTestEnabled: true,
-        })
+        }))
       },
       onLeave: () => {
         audio.playUiClick()
-        saveGameSettings({
-          ...loadGameSettings({}),
+        saveGameSettings(buildSettingsSnapshot({
           gameStarted: false,
-        })
+        }))
       },
       onClose: () => {
         audio.playUiClick()
@@ -745,6 +765,7 @@ export class GameController {
     gameLayer.addChild(catalogOverlay.container)
     gameLayer.addChild(settingsOverlay.container)
     gameLayer.addChild(gameOverLayer)
+    window.addEventListener('game-settings-changed', syncFromStorage)
 
     let elapsedSeconds = 0
     let fpsSampleElapsed = 0
@@ -868,6 +889,7 @@ export class GameController {
       app.renderer.off('resize', layout)
       app.ticker.remove(tick)
       app.canvas.removeEventListener('pointerdown', unlockAudio)
+      window.removeEventListener('game-settings-changed', syncFromStorage)
 
       bulletSystem.destroy()
       enemyBulletSystem.destroy()

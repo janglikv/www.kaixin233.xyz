@@ -44,6 +44,15 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose }) 
   bg
     .rect(0, 0, width, height)
     .fill({ color: 0x071127, alpha: 0.97 })
+  bg.eventMode = 'static'
+  bg.cursor = 'default'
+  bg.hitArea = new PIXI.Rectangle(0, 0, width, height)
+  bg.on('pointerdown', (event) => {
+    event.stopPropagation()
+  })
+  bg.on('pointertap', (event) => {
+    event.stopPropagation()
+  })
   container.addChild(bg)
 
   const closeBg = new PIXI.Graphics()

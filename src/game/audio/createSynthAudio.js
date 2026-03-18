@@ -531,6 +531,8 @@ export const createSynthAudio = () => {
   }
 
   const ready = () => unlocked && context && bufferBank
+  const getMasterTargetGain = () => (musicEnabled ? 0.64 : 0)
+  const getMusicTargetGain = () => (musicEnabled ? 0.36 : 0)
 
   const stopMusic = () => {
     if (!musicSource) return
@@ -553,7 +555,7 @@ export const createSynthAudio = () => {
   }
 
   const playBuffer = (buffer, { gain = 1, destination = masterGain, playbackRate = 1 } = {}) => {
-    if (!ready() || !buffer) return
+    if (!ready() || !buffer || !musicEnabled) return
 
     const source = context.createBufferSource()
     const gainNode = context.createGain()
@@ -612,7 +614,7 @@ export const createSynthAudio = () => {
       playBuffer(high ? bufferBank.uiHigh : bufferBank.ui, { gain: 0.46 })
     },
     playGameOver() {
-      if (!ready() || gameOverPlayed) return
+      if (!ready() || gameOverPlayed || !musicEnabled) return
       gameOverPlayed = true
       musicGain.gain.cancelScheduledValues(context.currentTime)
       musicGain.gain.setValueAtTime(musicGain.gain.value, context.currentTime)
@@ -627,9 +629,12 @@ export const createSynthAudio = () => {
       } else {
         stopMusic()
       }
+      masterGain.gain.cancelScheduledValues(context.currentTime)
+      masterGain.gain.setValueAtTime(masterGain.gain.value, context.currentTime)
+      masterGain.gain.linearRampToValueAtTime(getMasterTargetGain(), context.currentTime + 0.16)
       musicGain.gain.cancelScheduledValues(context.currentTime)
       musicGain.gain.setValueAtTime(musicGain.gain.value, context.currentTime)
-      musicGain.gain.linearRampToValueAtTime(musicEnabled ? 0.36 : 0, context.currentTime + 0.16)
+      musicGain.gain.linearRampToValueAtTime(getMusicTargetGain(), context.currentTime + 0.16)
     },
     isMusicEnabled() {
       return musicEnabled
@@ -642,9 +647,12 @@ export const createSynthAudio = () => {
       } else {
         stopMusic()
       }
+      masterGain.gain.cancelScheduledValues(context.currentTime)
+      masterGain.gain.setValueAtTime(masterGain.gain.value, context.currentTime)
+      masterGain.gain.linearRampToValueAtTime(getMasterTargetGain(), context.currentTime + 0.12)
       musicGain.gain.cancelScheduledValues(context.currentTime)
       musicGain.gain.setValueAtTime(musicGain.gain.value, context.currentTime)
-      musicGain.gain.linearRampToValueAtTime(musicEnabled ? 0.36 : 0, context.currentTime + 0.12)
+      musicGain.gain.linearRampToValueAtTime(getMusicTargetGain(), context.currentTime + 0.12)
     },
     setMasterVolume(value) {
       if (!masterGain) return

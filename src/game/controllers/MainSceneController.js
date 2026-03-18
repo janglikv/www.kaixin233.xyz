@@ -45,6 +45,10 @@ const GAME_SETTINGS_DEFAULTS = {
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
 }
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
+const clampAttackPower = (value) => clamp(Math.round(value), 1, 999)
+const clampAttackSpeed = (value) => clamp(Math.round(value * 10) / 10, 1, 30)
+const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
 
 const normalizeGameSettings = (settings) => {
   const legacyEquippedItemId =
@@ -68,6 +72,12 @@ const normalizeGameSettings = (settings) => {
         : legacyItem?.kind === 'exhaust'
           ? legacyItem.id
           : EXHAUST_0_ITEM_ID,
+    musicEnabled: Boolean(settings.musicEnabled),
+    fpsEnabled: settings.fpsEnabled !== false,
+    impactEffectsEnabled: settings.impactEffectsEnabled !== false,
+    attackPower: clampAttackPower(settings.attackPower),
+    attackSpeed: clampAttackSpeed(settings.attackSpeed),
+    critChance: clampCritChance(settings.critChance),
   }
 }
 
@@ -835,7 +845,9 @@ export class MainSceneController {
     const gameLayer = new PIXI.Container()
     app.stage.addChild(gameLayer)
 
-    const persistedSettings = normalizeGameSettings(loadGameSettings(GAME_SETTINGS_DEFAULTS))
+    const readPersistedSettings = () =>
+      normalizeGameSettings(loadGameSettings(GAME_SETTINGS_DEFAULTS))
+    const persistedSettings = readPersistedSettings()
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let equippedState = {
       shipItemId: persistedSettings.equippedShipItemId,
@@ -845,8 +857,6 @@ export class MainSceneController {
     let layoutOffsetX = 0
     let layoutOffsetY = 0
     let animationTime = 0
-    let isCatalogVisible = false
-    let isSettingsVisible = false
     let isMusicEnabled = persistedSettings.musicEnabled !== false
     let isFpsVisible = persistedSettings.fpsEnabled !== false
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled !== false
@@ -854,10 +864,23 @@ export class MainSceneController {
     let attackSpeed = persistedSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
     let critChance = persistedSettings.critChance ?? PLAYER_STATS.critChance
 
+    const applyPersistedSettings = (nextSettings) => {
+      isPressureTestEnabled = nextSettings.pressureTestEnabled
+      equippedState = {
+        shipItemId: nextSettings.equippedShipItemId,
+        exhaustItemId: nextSettings.equippedExhaustItemId,
+      }
+      isMusicEnabled = nextSettings.musicEnabled !== false
+      isFpsVisible = nextSettings.fpsEnabled !== false
+      isImpactEffectsEnabled = nextSettings.impactEffectsEnabled !== false
+      attackPower = nextSettings.attackPower ?? PLAYER_STATS.attackPower
+      attackSpeed = nextSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
+      critChance = nextSettings.critChance ?? PLAYER_STATS.critChance
+    }
+
     const persistSettings = (overrides = {}) => {
       saveGameSettings(
         {
-          ...loadGameSettings({}),
           gameStarted: false,
           pressureTestEnabled: isPressureTestEnabled,
           equippedShipItemId: equippedState.shipItemId,
@@ -898,7 +921,6 @@ export class MainSceneController {
       entries: SHIP_CATALOG,
       onClose: () => {
         catalogOverlay.hide()
-        isCatalogVisible = false
       },
     })
     const getSettingsOverlayState = () => ({
@@ -941,9 +963,7 @@ export class MainSceneController {
       },
       onCatalogOpen: () => {
         settingsOverlay.hide()
-        isSettingsVisible = false
         catalogOverlay.toggle()
-        isCatalogVisible = catalogOverlay.isVisible()
       },
       onClearData: () => {
         clearGameSettings()
@@ -956,13 +976,11 @@ export class MainSceneController {
       },
       onLeave: () => {
         saveGameSettings({
-          ...loadGameSettings({}),
           gameStarted: false,
         })
       },
       onClose: () => {
         settingsOverlay.hide()
-        isSettingsVisible = false
       },
     })
     const settingsButton = createSettingsButton({
@@ -970,7 +988,6 @@ export class MainSceneController {
       y: 28,
       onTap: () => {
         settingsOverlay.toggle()
-        isSettingsVisible = settingsOverlay.isVisible()
         settingsOverlay.update(getSettingsOverlayState())
       },
     })
@@ -1025,6 +1042,16 @@ export class MainSceneController {
     gameLayer.addChild(settingsOverlay.container)
     gameLayer.addChild(itemDetailModal.container)
 
+    const syncFromStorage = () => {
+      applyPersistedSettings(readPersistedSettings())
+      inventoryPanel.update(equippedState)
+      previewPanel.setTheme(getPreviewShipTheme(equippedState))
+      previewPanel.setExhaustIndex(getPreviewExhaustIndex(equippedState))
+      startButton.setEnabled(canStartGame(equippedState))
+      settingsOverlay.update(getSettingsOverlayState())
+    }
+    window.addEventListener('game-settings-changed', syncFromStorage)
+
     const tick = (ticker) => {
       const deltaSeconds = ticker.deltaMS / 1000
       animationTime += deltaSeconds
@@ -1067,6 +1094,7 @@ export class MainSceneController {
 
       app.renderer.off('resize', layout)
       app.ticker.remove(tick)
+      window.removeEventListener('game-settings-changed', syncFromStorage)
       previewPanel.destroy()
       inventoryPanel.destroy()
       itemDetailModal.destroy()
