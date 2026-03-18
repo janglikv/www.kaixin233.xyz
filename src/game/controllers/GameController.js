@@ -7,6 +7,7 @@ import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createBattleFlowRuntime } from '../runtime/createBattleFlowRuntime'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { createGameSceneRuntime } from '../runtime/createGameSceneRuntime'
+import { createGameSessionCoordinator } from '../runtime/createGameSessionCoordinator'
 import {
   createGameSettingsNormalizer,
   createGameSettingsSession,
@@ -202,41 +203,20 @@ export class GameController {
     })
     let battleFlow = null
     const keyboard = createKeyboardController()
-    let currentExhaustIndex = initialEquippedExhaustIndex
-    const syncFromStorage = () => {
-      const nextSettings = settingsSession.reload()
-      isImpactEffectsEnabled = nextSettings.impactEffectsEnabled
-      currentExhaustIndex = getExhaustIndexByItemId(nextSettings.equippedExhaustItemId)
-      playerStats.attackPower = nextSettings.attackPower
-      playerStats.attackSpeed = nextSettings.attackSpeed
-      playerStats.critChance = nextSettings.critChance
-      audio.setMusicEnabled(nextSettings.musicEnabled)
-      playerCombat.syncSettings({
-        attackPower: playerStats.attackPower,
-        attackSpeed: playerStats.attackSpeed,
-        critChance: playerStats.critChance,
-        exhaustIndex: currentExhaustIndex,
-      })
-      overlayController?.updateStats(playerStats)
-      overlayController?.syncFromState({
-        isCatalogVisible: nextSettings.catalogVisible === true,
-        activeCatalogPreviewCode: nextSettings.catalogPreviewCode,
-        isFpsVisible: nextSettings.fpsEnabled,
-        settingsState: settingsSession.getOverlayState(),
-      })
-    }
-    const persistSettings = (patch = {}) =>
-      settingsSession.persist({
-        gameStarted: true,
-        musicEnabled: audio.isMusicEnabled(),
-        impactEffectsEnabled: isImpactEffectsEnabled,
-        attackPower: playerStats.attackPower,
-        attackSpeed: playerStats.attackSpeed,
-        critChance: playerStats.critChance,
-        equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
-        ...patch,
-      })
-    const getSettingsOverlayState = () => settingsSession.getOverlayState()
+    const sessionCoordinator = createGameSessionCoordinator({
+      normalizeGameSettings,
+      settingsSession,
+      audio,
+      playerStats,
+      playerCombat,
+      initialExhaustIndex: initialEquippedExhaustIndex,
+      onImpactEffectsChange: (enabled) => {
+        isImpactEffectsEnabled = enabled
+      },
+      onOverlayStatsChange: (stats) => {
+        overlayController?.updateStats(stats)
+      },
+    })
     const unlockAudio = () => {
       audio.unlock()
     }
@@ -259,94 +239,10 @@ export class GameController {
       initialCatalogVisible: persistedSettings.catalogVisible === true,
       initialCatalogPreviewCode: persistedSettings.catalogPreviewCode,
       initialFpsVisible: persistedSettings.fpsEnabled,
-      getSettingsState: getSettingsOverlayState,
-      onUiClick: (options) => audio.playUiClick(options),
-      onPreviewOpen: (code) => {
-        persistSettings({
-          catalogVisible: true,
-          catalogPreviewCode: code,
-        })
-      },
-      onPreviewClose: () => {
-        persistSettings({
-          catalogPreviewCode: null,
-        })
-      },
-      onCatalogClose: () => {
-        persistSettings({
-          catalogVisible: false,
-          catalogPreviewCode: null,
-        })
-      },
-      onMusicToggle: (enabled) => {
-        audio.setMusicEnabled(enabled)
-        if (enabled) {
-          audio.playUiClick({ high: true })
-        }
-        persistSettings({
-          musicEnabled: enabled,
-        })
-      },
-      onFpsToggle: (enabled) => {
-        audio.playUiClick({ high: enabled })
-        persistSettings({
-          fpsEnabled: enabled,
-        })
-      },
-      onImpactEffectsToggle: (enabled) => {
-        audio.playUiClick({ high: enabled })
-        isImpactEffectsEnabled = enabled
-        persistSettings({
-          impactEffectsEnabled: enabled,
-        })
-      },
-      onAdjustStat: (key, direction) => {
-        audio.playUiClick({ high: direction > 0 })
-        if (key === 'attackPower') {
-          playerStats.attackPower = normalizeGameSettings({
-            attackPower: playerStats.attackPower + direction,
-          }).attackPower
-        }
-        if (key === 'attackSpeed') {
-          playerStats.attackSpeed = normalizeGameSettings({
-            attackSpeed: playerStats.attackSpeed + direction * 0.5,
-          }).attackSpeed
-        }
-        if (key === 'critChance') {
-          playerStats.critChance = normalizeGameSettings({
-            critChance: playerStats.critChance + direction * 0.05,
-          }).critChance
-        }
-        playerCombat.syncSettings({
-          attackPower: playerStats.attackPower,
-          attackSpeed: playerStats.attackSpeed,
-          critChance: playerStats.critChance,
-          exhaustIndex: currentExhaustIndex,
-        })
-        overlayController.updateStats(playerStats)
-        persistSettings()
-      },
-      onCatalogOpen: (visible) => {
-        persistSettings({
-          catalogVisible: visible,
-          catalogPreviewCode: visible ? settingsSession.getState().catalogPreviewCode : null,
-        })
-      },
-      onClearData: () => {
-        settingsSession.clear()
-      },
-      onEnterDebugScene: () => {
-        persistSettings({
-          gameStarted: true,
-          pressureTestEnabled: true,
-        })
-      },
-      onLeave: () => {
-        persistSettings({
-          gameStarted: false,
-        })
-      },
+      getSettingsState: () => sessionCoordinator.getSettingsOverlayState(),
+      ...sessionCoordinator.createOverlayHandlers(),
     })
+    sessionCoordinator.setOverlayController(overlayController)
     battleFlow = createBattleFlowRuntime({
       spaceBackdrop,
       playerCombat,
@@ -359,7 +255,10 @@ export class GameController {
       spawnImpact,
       gameOverFadeTime: GAME_OVER_FADE_TIME,
     })
-    window.addEventListener('game-settings-changed', syncFromStorage)
+    const handleSettingsChanged = () => {
+      sessionCoordinator.syncFromStorage()
+    }
+    window.addEventListener('game-settings-changed', handleSettingsChanged)
 
     let fpsSampleElapsed = 0
     let fpsFrameCount = 0
@@ -393,7 +292,7 @@ export class GameController {
       app.renderer.off('resize', sceneRuntime.layout)
       app.ticker.remove(tick)
       app.canvas.removeEventListener('pointerdown', unlockAudio)
-      window.removeEventListener('game-settings-changed', syncFromStorage)
+      window.removeEventListener('game-settings-changed', handleSettingsChanged)
 
       keyboard.destroy()
       pointer.destroy()
