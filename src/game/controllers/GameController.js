@@ -2,6 +2,7 @@ import * as PIXI from 'pixi.js'
 import { createSynthAudio } from '../audio/createSynthAudio'
 import { createBulletSystem } from '../effects/createBulletSystem'
 import { getEnemyCatalogEntryByPluginIndex } from '../data/shipCatalog'
+import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
 import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
@@ -61,6 +62,7 @@ const GAME_SETTINGS_DEFAULTS = {
   musicEnabled: true,
   fpsEnabled: true,
   impactEffectsEnabled: true,
+  catalogVisible: false,
   attackPower: PLAYER_STATS.attackPower,
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
@@ -98,6 +100,8 @@ const normalizeGameSettings = (settings) => ({
   musicEnabled: Boolean(settings.musicEnabled),
   fpsEnabled: settings.fpsEnabled !== false,
   impactEffectsEnabled: settings.impactEffectsEnabled !== false,
+  catalogVisible: settings.catalogVisible === true,
+  catalogPreviewCode: typeof settings.catalogPreviewCode === 'string' ? settings.catalogPreviewCode : null,
   attackPower: clampAttackPower(settings.attackPower),
   attackSpeed: clampAttackSpeed(settings.attackSpeed),
   critChance: clampCritChance(settings.critChance),
@@ -535,7 +539,8 @@ export class GameController {
     let catalogBounds = null
     let settingsButtonBounds = null
     let settingsBounds = null
-    let isCatalogVisible = false
+    let isCatalogVisible = persistedSettings.catalogVisible === true
+    let activeCatalogPreviewCode = persistedSettings.catalogPreviewCode
     let isSettingsVisible = false
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let isFpsVisible = persistedSettings.fpsEnabled
@@ -555,6 +560,8 @@ export class GameController {
         attackSpeed: playerStats.attackSpeed,
         critChance: playerStats.critChance,
         exhaustIndex: currentExhaustIndex,
+        catalogVisible: isCatalogVisible,
+        catalogPreviewCode: activeCatalogPreviewCode,
         ...overrides,
       })
     const syncFromStorage = () => {
@@ -569,9 +576,19 @@ export class GameController {
       isImpactEffectsEnabled = nextSettings.impactEffectsEnabled
       equippedShipItemId = nextSettings.equippedShipItemId
       currentExhaustIndex = getExhaustIndexByItemId(nextSettings.equippedExhaustItemId)
+      isCatalogVisible = nextSettings.catalogVisible === true
+      activeCatalogPreviewCode = nextSettings.catalogPreviewCode
       audio.setMusicEnabled(nextSettings.musicEnabled)
       fpsText.visible = isFpsVisible
       exhaustSwitcher.setIndex(currentExhaustIndex)
+      if (isCatalogVisible) {
+        catalogOverlay.show()
+        if (activeCatalogPreviewCode) {
+          catalogOverlay.openPreviewByCode(activeCatalogPreviewCode)
+        }
+      } else {
+        catalogOverlay.hide()
+      }
       settingsOverlay.update(getSettingsOverlayState())
     }
     const persistSettings = () => {
@@ -648,13 +665,29 @@ export class GameController {
       y: 0,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
-      entries: SHIP_CATALOG,
+      entries: CATALOG_ENTRIES,
+      onPreviewOpen: (code) => {
+        activeCatalogPreviewCode = code
+        persistSettings()
+      },
+      onPreviewClose: () => {
+        activeCatalogPreviewCode = null
+        persistSettings()
+      },
       onClose: () => {
         audio.playUiClick()
         catalogOverlay.hide()
         isCatalogVisible = false
+        activeCatalogPreviewCode = null
+        persistSettings()
       },
     })
+    if (isCatalogVisible) {
+      catalogOverlay.show()
+      if (activeCatalogPreviewCode) {
+        catalogOverlay.openPreviewByCode(activeCatalogPreviewCode)
+      }
+    }
     const settingsOverlay = createSettingsOverlay({
       x: 0,
       y: 0,
@@ -703,6 +736,10 @@ export class GameController {
         isSettingsVisible = false
         catalogOverlay.toggle()
         isCatalogVisible = catalogOverlay.isVisible()
+        if (!isCatalogVisible) {
+          activeCatalogPreviewCode = null
+        }
+        persistSettings()
       },
       onClearData: () => {
         audio.playUiClick()

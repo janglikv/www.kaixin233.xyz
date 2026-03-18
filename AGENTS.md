@@ -10,11 +10,7 @@
 - `drawRect` 改名为 `rect`。
 - 推荐链式：`graphics.rect(x, y, w, h).fill(color)`。
 
-## Planck.js 类型
-- 这版 `planck-js` 的“函数式工厂”基本都已弃用，统一用 `new`。
-- 例如：
-- `new planck.Vec2(x, y)`
-- `new planck.Box(w, h)`
-- `new planck.Polygon(vertices)`
-- `new planck.RevoluteJoint(def, bodyA, bodyB, anchor)`
-- 规则：看到 `planck.Xxx(...)` 直接调用时，优先改成 `new planck.Xxx(...)`，可长期避免 TS 弃用提示。
+## 命令执行约定
+- 不要每次修改后都运行 `build` 和 `lint`。
+- 只有在改动范围较大、涉及多文件联动或用户明确要求时，才运行 `lint`。
+- `build` 仅在确有必要验证打包结果时执行，非必要不要主动运行。

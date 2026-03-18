@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js'
+import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { PLAYER_SHIP_THEME } from '../data/shipCatalog'
 import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
@@ -41,6 +42,7 @@ const GAME_SETTINGS_DEFAULTS = {
   musicEnabled: true,
   fpsEnabled: true,
   impactEffectsEnabled: true,
+  catalogVisible: false,
   attackPower: PLAYER_STATS.attackPower,
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
@@ -75,6 +77,8 @@ const normalizeGameSettings = (settings) => {
     musicEnabled: Boolean(settings.musicEnabled),
     fpsEnabled: settings.fpsEnabled !== false,
     impactEffectsEnabled: settings.impactEffectsEnabled !== false,
+    catalogVisible: settings.catalogVisible === true,
+    catalogPreviewCode: typeof settings.catalogPreviewCode === 'string' ? settings.catalogPreviewCode : null,
     attackPower: clampAttackPower(settings.attackPower),
     attackSpeed: clampAttackSpeed(settings.attackSpeed),
     critChance: clampCritChance(settings.critChance),
@@ -860,6 +864,8 @@ export class MainSceneController {
     let isMusicEnabled = persistedSettings.musicEnabled !== false
     let isFpsVisible = persistedSettings.fpsEnabled !== false
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled !== false
+    let isCatalogVisible = persistedSettings.catalogVisible === true
+    let activeCatalogPreviewCode = persistedSettings.catalogPreviewCode
     let attackPower = persistedSettings.attackPower ?? PLAYER_STATS.attackPower
     let attackSpeed = persistedSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
     let critChance = persistedSettings.critChance ?? PLAYER_STATS.critChance
@@ -873,6 +879,8 @@ export class MainSceneController {
       isMusicEnabled = nextSettings.musicEnabled !== false
       isFpsVisible = nextSettings.fpsEnabled !== false
       isImpactEffectsEnabled = nextSettings.impactEffectsEnabled !== false
+      isCatalogVisible = nextSettings.catalogVisible === true
+      activeCatalogPreviewCode = nextSettings.catalogPreviewCode
       attackPower = nextSettings.attackPower ?? PLAYER_STATS.attackPower
       attackSpeed = nextSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
       critChance = nextSettings.critChance ?? PLAYER_STATS.critChance
@@ -888,6 +896,8 @@ export class MainSceneController {
           musicEnabled: isMusicEnabled,
           fpsEnabled: isFpsVisible,
           impactEffectsEnabled: isImpactEffectsEnabled,
+          catalogVisible: isCatalogVisible,
+          catalogPreviewCode: activeCatalogPreviewCode,
           attackPower,
           attackSpeed,
           critChance,
@@ -918,11 +928,28 @@ export class MainSceneController {
       y: 0,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
-      entries: SHIP_CATALOG,
+      entries: CATALOG_ENTRIES,
+      onPreviewOpen: (code) => {
+        activeCatalogPreviewCode = code
+        persistSettings()
+      },
+      onPreviewClose: () => {
+        activeCatalogPreviewCode = null
+        persistSettings()
+      },
       onClose: () => {
         catalogOverlay.hide()
+        isCatalogVisible = false
+        activeCatalogPreviewCode = null
+        persistSettings()
       },
     })
+    if (isCatalogVisible) {
+      catalogOverlay.show()
+      if (activeCatalogPreviewCode) {
+        catalogOverlay.openPreviewByCode(activeCatalogPreviewCode)
+      }
+    }
     const getSettingsOverlayState = () => ({
       musicEnabled: isMusicEnabled,
       fpsEnabled: isFpsVisible,
@@ -964,6 +991,11 @@ export class MainSceneController {
       onCatalogOpen: () => {
         settingsOverlay.hide()
         catalogOverlay.toggle()
+        isCatalogVisible = catalogOverlay.isVisible()
+        if (!isCatalogVisible) {
+          activeCatalogPreviewCode = null
+        }
+        persistSettings()
       },
       onClearData: () => {
         clearGameSettings()

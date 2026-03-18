@@ -8,6 +8,8 @@ const STORAGE_KEYS = {
   musicEnabled: `${STORAGE_KEY_PREFIX}:musicEnabled`,
   fpsEnabled: `${STORAGE_KEY_PREFIX}:fpsEnabled`,
   impactEffectsEnabled: `${STORAGE_KEY_PREFIX}:impactEffectsEnabled`,
+  catalogVisible: `${STORAGE_KEY_PREFIX}:catalogVisible`,
+  catalogPreviewCode: `${STORAGE_KEY_PREFIX}:catalogPreviewCode`,
   attackPower: `${STORAGE_KEY_PREFIX}:attackPower`,
   attackSpeed: `${STORAGE_KEY_PREFIX}:attackSpeed`,
   critChance: `${STORAGE_KEY_PREFIX}:critChance`,
