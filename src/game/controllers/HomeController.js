@@ -781,7 +781,7 @@ const TACTICAL_ITEMS = [
     id: HOMING_BURST_ITEM_ID,
     kind: 'tactical',
     name: '急中生智',
-    description: '暴击命中后立即触发追踪弹齐射，自动搜寻附近后续目标。',
+    description: '每100ms合并本轮暴击次数，并发射对应数量的追踪弹，自动搜寻附近后续目标。',
     drawIcon: ({ size }) => createTacticalChipIcon({ size }),
   },
 ]

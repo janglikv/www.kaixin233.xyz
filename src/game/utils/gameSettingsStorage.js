@@ -3,6 +3,7 @@ const STORAGE_KEY_PREFIX = 'kaixin233-game-setting'
 const STORAGE_KEYS = {
   gameStarted: `${STORAGE_KEY_PREFIX}:gameStarted`,
   pressureTestEnabled: `${STORAGE_KEY_PREFIX}:pressureTestEnabled`,
+  debugSceneMode: `${STORAGE_KEY_PREFIX}:debugSceneMode`,
   equippedShipItemId: `${STORAGE_KEY_PREFIX}:equippedShipItemId`,
   equippedExhaustItemId: `${STORAGE_KEY_PREFIX}:equippedExhaustItemId`,
   equippedTacticalItemId: `${STORAGE_KEY_PREFIX}:equippedTacticalItemId`,

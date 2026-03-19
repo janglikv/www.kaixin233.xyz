@@ -99,6 +99,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
   const layer = new PIXI.Container()
   const missiles = []
   const pool = []
+  let launchSequence = 0
   parent.addChild(layer)
 
   const acquireMissile = () => {
@@ -274,11 +275,19 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
   }
 
   return {
-    spawnPair({ x, y, target, getTargets }) {
-      if (!target) return
-      onSpawn?.({ x, y, target })
-      spawnMissile({ x, y, side: -1, colorOffset: 0, target, getTargets })
-      spawnMissile({ x, y, side: 1, colorOffset: 3, target, getTargets })
+    spawnBurst({ x, y, targets, getTargets }) {
+      if (!Array.isArray(targets) || targets.length === 0) return
+      onSpawn?.({ x, y, targets })
+
+      for (let index = 0; index < targets.length; index += 1) {
+        const target = targets[index]
+        if (!target) continue
+        const sequence = launchSequence
+        const side = sequence % 2 === 0 ? -1 : 1
+        const colorOffset = side < 0 ? sequence % 3 : 3 + (sequence % 3)
+        launchSequence += 1
+        spawnMissile({ x, y, side, colorOffset, target, getTargets })
+      }
     },
     update(deltaSeconds) {
       targetCache.clear()
