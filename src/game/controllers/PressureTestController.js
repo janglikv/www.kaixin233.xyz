@@ -61,11 +61,13 @@ const ENEMY_BULLET_DAMAGE = 5
 const GAME_OVER_FADE_TIME = 1.2
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const EXHAUST_0_ITEM_ID = 'exhaust-0'
+const HOMING_BURST_ITEM_ID = 'tactical-quick-wit'
 const GAME_SETTINGS_DEFAULTS = {
   gameStarted: true,
   pressureTestEnabled: true,
   equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
   equippedExhaustItemId: EXHAUST_0_ITEM_ID,
+  equippedTacticalItemId: null,
   musicEnabled: true,
   fpsEnabled: true,
   impactEffectsEnabled: true,
@@ -101,6 +103,8 @@ const normalizeGameSettings = (settings) => ({
     typeof settings.equippedExhaustItemId === 'string'
       ? settings.equippedExhaustItemId
       : EXHAUST_0_ITEM_ID,
+  equippedTacticalItemId:
+    typeof settings.equippedTacticalItemId === 'string' ? settings.equippedTacticalItemId : null,
   musicEnabled: Boolean(settings.musicEnabled),
   fpsEnabled: settings.fpsEnabled !== false,
   impactEffectsEnabled: settings.impactEffectsEnabled !== false,
@@ -425,6 +429,7 @@ export class PressureTestController {
       attackPower: persistedSettings.attackPower,
       attackSpeed: persistedSettings.attackSpeed,
       critChance: persistedSettings.critChance,
+      hasHomingBurst: persistedSettings.equippedTacticalItemId === HOMING_BURST_ITEM_ID,
     }
     worldMask
       .roundRect(
@@ -583,7 +588,7 @@ export class PressureTestController {
             sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
           })
         }
-        if (!isCrit || !damagedEnemy) return
+        if (!isCrit || !damagedEnemy || !playerStats.hasHomingBurst) return
 
         let followUpTarget = null
         let followUpDistance = Infinity
@@ -604,12 +609,7 @@ export class PressureTestController {
           x: shipScene.shipX,
           y: shipScene.shipY - SHIP_MUZZLE_OFFSET,
           target: followUpTarget,
-          getTargets: () =>
-            enemyFormation.getHitboxes().map((enemy) => ({
-              id: enemy.id,
-              x: enemy.centerX,
-              y: enemy.centerY,
-            })),
+          getTargets: () => enemyFormation.getHitboxes(),
         })
       },
     })
@@ -624,6 +624,7 @@ export class PressureTestController {
     let isFpsVisible = persistedSettings.fpsEnabled
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
     let equippedShipItemId = persistedSettings.equippedShipItemId
+    let equippedTacticalItemId = persistedSettings.equippedTacticalItemId
     let currentExhaustIndex = initialEquippedExhaustIndex
     const buildSettingsSnapshot = (overrides = {}) =>
       normalizeGameSettings({
@@ -631,6 +632,7 @@ export class PressureTestController {
         pressureTestEnabled: isPressureTestEnabled,
         equippedShipItemId,
         equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
+        equippedTacticalItemId,
         musicEnabled: audio.isMusicEnabled(),
         fpsEnabled: isFpsVisible,
         impactEffectsEnabled: isImpactEffectsEnabled,
@@ -653,9 +655,14 @@ export class PressureTestController {
       isFpsVisible = nextSettings.fpsEnabled
       isImpactEffectsEnabled = nextSettings.impactEffectsEnabled
       equippedShipItemId = nextSettings.equippedShipItemId
+      equippedTacticalItemId = nextSettings.equippedTacticalItemId
       currentExhaustIndex = getExhaustIndexByItemId(nextSettings.equippedExhaustItemId)
       isCatalogVisible = nextSettings.catalogVisible === true
       activeCatalogPreviewCode = nextSettings.catalogPreviewCode
+      playerStats.attackPower = nextSettings.attackPower ?? PLAYER_STATS.attackPower
+      playerStats.attackSpeed = nextSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
+      playerStats.critChance = nextSettings.critChance ?? PLAYER_STATS.critChance
+      playerStats.hasHomingBurst = nextSettings.equippedTacticalItemId === HOMING_BURST_ITEM_ID
       audio.setMusicEnabled(nextSettings.musicEnabled)
       fpsText.visible = isFpsVisible
       exhaustSwitcher.setIndex(currentExhaustIndex)

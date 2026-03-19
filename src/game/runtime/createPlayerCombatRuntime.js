@@ -84,6 +84,7 @@ export const createPlayerCombatRuntime = ({
     attackPower: initialStats.attackPower,
     attackSpeed: initialStats.attackSpeed,
     critChance: initialStats.critChance,
+    hasHomingBurst: initialStats.hasHomingBurst === true,
   }
   const health = {
     current: initialHealth.current,
@@ -165,7 +166,7 @@ export const createPlayerCombatRuntime = ({
           sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
         })
       }
-      if (!isCrit || !damagedEnemy) return
+      if (!isCrit || !damagedEnemy || !stats.hasHomingBurst) return
 
       let followUpTarget = null
       let followUpDistance = Infinity
@@ -186,12 +187,7 @@ export const createPlayerCombatRuntime = ({
         x: shipScene.shipX,
         y: shipScene.shipY - SHIP_MUZZLE_OFFSET,
         target: followUpTarget,
-        getTargets: () =>
-          enemyFormation.getHitboxes().map((enemy) => ({
-            id: enemy.id,
-            x: enemy.centerX,
-            y: enemy.centerY,
-          })),
+        getTargets: () => enemyFormation.getHitboxes(),
       })
     },
   })
@@ -240,10 +236,11 @@ export const createPlayerCombatRuntime = ({
     setExhaustIndex(nextIndex) {
       exhaustSwitcher.setIndex(nextIndex)
     },
-    syncSettings({ attackPower, attackSpeed, critChance, exhaustIndex }) {
+    syncSettings({ attackPower, attackSpeed, critChance, exhaustIndex, hasHomingBurst }) {
       stats.attackPower = attackPower
       stats.attackSpeed = attackSpeed
       stats.critChance = critChance
+      stats.hasHomingBurst = hasHomingBurst === true
       exhaustSwitcher.setIndex(exhaustIndex)
     },
     applyIncomingDamage,

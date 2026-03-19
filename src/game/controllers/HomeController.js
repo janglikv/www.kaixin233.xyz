@@ -25,6 +25,7 @@ const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const SHIP_FRAME_ITEM_ID = 'ship-frame-1'
 const EXHAUST_0_ITEM_ID = 'exhaust-0'
 const EXHAUST_1_ITEM_ID = 'exhaust-1'
+const HOMING_BURST_ITEM_ID = 'tactical-quick-wit'
 const SHIP_DEFAULT_ITEM_NAME = '机体 #0'
 const SHIP_DEFAULT_ITEM_DESCRIPTION = '默认机体，维持当前基础机身外观，适合常规出击。'
 const SHIP_FRAME_ITEM_NAME = '机体 #1'
@@ -42,6 +43,7 @@ const GAME_SETTINGS_DEFAULTS = {
   pressureTestEnabled: false,
   equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
   equippedExhaustItemId: EXHAUST_0_ITEM_ID,
+  equippedTacticalItemId: null,
   musicEnabled: true,
   fpsEnabled: true,
   impactEffectsEnabled: true,
@@ -72,6 +74,12 @@ const normalizeGameSettings = (settings) => {
         : legacyItem?.kind === 'exhaust'
           ? legacyItem.id
           : EXHAUST_0_ITEM_ID,
+    equippedTacticalItemId:
+      typeof settings.equippedTacticalItemId === 'string'
+        ? settings.equippedTacticalItemId
+        : legacyItem?.kind === 'tactical'
+          ? legacyItem.id
+          : null,
     musicEnabled: Boolean(settings.musicEnabled),
     fpsEnabled: settings.fpsEnabled !== false,
     impactEffectsEnabled: settings.impactEffectsEnabled !== false,
@@ -371,6 +379,64 @@ const createExhaustIcon = ({ size, pluginIndex }) => {
     },
     destroy() {
       runtime?.destroy()
+    },
+  }
+}
+
+const createTacticalChipIcon = ({ size }) => {
+  const container = new PIXI.Container()
+  const scale = size / 196
+  const board = new PIXI.Graphics()
+  const pulseRing = new PIXI.Graphics()
+  const core = new PIXI.Graphics()
+  const traces = new PIXI.Graphics()
+  let elapsed = 0
+
+  board
+    .roundRect(size * 0.18, size * 0.18, size * 0.64, size * 0.64, 20 * scale)
+    .fill({ color: 0x10243f, alpha: 0.98 })
+    .stroke({ color: 0x6ec8ff, width: 3 * scale, alpha: 0.95 })
+  container.addChild(board)
+
+  ;[
+    [0.5, 0.18, 0.5, 0.34],
+    [0.5, 0.66, 0.5, 0.82],
+    [0.18, 0.5, 0.34, 0.5],
+    [0.66, 0.5, 0.82, 0.5],
+    [0.3, 0.3, 0.4, 0.4],
+    [0.7, 0.3, 0.6, 0.4],
+    [0.3, 0.7, 0.4, 0.6],
+    [0.7, 0.7, 0.6, 0.6],
+  ].forEach(([x1, y1, x2, y2]) => {
+    traces
+      .moveTo(size * x1, size * y1)
+      .lineTo(size * x2, size * y2)
+      .stroke({ color: 0x57b8ff, width: 3 * scale, alpha: 0.92, cap: 'round' })
+  })
+  container.addChild(traces)
+
+  pulseRing
+    .circle(size * 0.5, size * 0.5, size * 0.18)
+    .stroke({ color: 0xffd86c, width: 5 * scale, alpha: 0.9 })
+  container.addChild(pulseRing)
+
+  core
+    .circle(size * 0.5, size * 0.5, size * 0.09)
+    .fill({ color: 0xfff0b8, alpha: 0.98 })
+  container.addChild(core)
+
+  return {
+    container,
+    update(equipped) {
+      container.alpha = equipped ? 1 : 0.94
+      core.tint = equipped ? 0xffffff : 0xfff0b8
+    },
+    tick(deltaSeconds) {
+      elapsed += deltaSeconds
+      const pulse = (Math.sin(elapsed * 4.8) + 1) * 0.5
+      pulseRing.scale.set(0.92 + pulse * 0.18)
+      pulseRing.alpha = 0.36 + pulse * 0.48
+      core.scale.set(0.94 + pulse * 0.12)
     },
   }
 }
@@ -710,14 +776,26 @@ const EXHAUST_ITEMS = EXHAUST_PLUGINS.map((plugin, index) => ({
   },
 }))
 
+const TACTICAL_ITEMS = [
+  {
+    id: HOMING_BURST_ITEM_ID,
+    kind: 'tactical',
+    name: '急中生智',
+    description: '暴击命中后立即触发追踪弹齐射，自动搜寻附近后续目标。',
+    drawIcon: ({ size }) => createTacticalChipIcon({ size }),
+  },
+]
+
 const INVENTORY_ITEMS = [
   ...SHIP_ITEMS,
   ...EXHAUST_ITEMS,
+  ...TACTICAL_ITEMS,
 ]
 
 const isItemEquipped = (item, equippedState) => {
   if (item.kind === 'ship') return equippedState.shipItemId === item.id
   if (item.kind === 'exhaust') return equippedState.exhaustItemId === item.id
+  if (item.kind === 'tactical') return equippedState.tacticalItemId === item.id
   return false
 }
 
@@ -732,6 +810,12 @@ const toggleEquippedItem = (item, equippedState) => {
     return {
       ...equippedState,
       exhaustItemId: equippedState.exhaustItemId === item.id ? null : item.id,
+    }
+  }
+  if (item.kind === 'tactical') {
+    return {
+      ...equippedState,
+      tacticalItemId: equippedState.tacticalItemId === item.id ? null : item.id,
     }
   }
   return equippedState
@@ -854,6 +938,7 @@ export class HomeController {
     let equippedState = {
       shipItemId: persistedSettings.equippedShipItemId,
       exhaustItemId: persistedSettings.equippedExhaustItemId,
+      tacticalItemId: persistedSettings.equippedTacticalItemId,
     }
     let layoutScale = 1
     let layoutOffsetX = 0
@@ -873,6 +958,7 @@ export class HomeController {
       equippedState = {
         shipItemId: nextSettings.equippedShipItemId,
         exhaustItemId: nextSettings.equippedExhaustItemId,
+        tacticalItemId: nextSettings.equippedTacticalItemId,
       }
       isMusicEnabled = nextSettings.musicEnabled !== false
       isFpsVisible = nextSettings.fpsEnabled !== false
@@ -891,6 +977,7 @@ export class HomeController {
           pressureTestEnabled: isPressureTestEnabled,
           equippedShipItemId: equippedState.shipItemId,
           equippedExhaustItemId: equippedState.exhaustItemId,
+          equippedTacticalItemId: equippedState.tacticalItemId,
           musicEnabled: isMusicEnabled,
           fpsEnabled: isFpsVisible,
           impactEffectsEnabled: isImpactEffectsEnabled,

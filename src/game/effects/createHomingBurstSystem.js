@@ -8,6 +8,9 @@ const TRAIL_LENGTH = 36
 const MISSILE_LAUNCH_JITTER = 0.18
 const MISSILE_BIAS_STRENGTH = 0.72
 const MISSILE_BIAS_DECAY = 0.94
+const BOUNDS_PADDING = 80
+const BOUNDS_MAX_X = 1280 + BOUNDS_PADDING
+const BOUNDS_MAX_Y = 720 + BOUNDS_PADDING
 const TRAIL_COLORS = [0xd90429, 0xf72585, 0xff9e00, 0x06d6a0, 0x118ab2, 0x8338ec]
 
 const pickColor = (offset) => TRAIL_COLORS[offset % TRAIL_COLORS.length]
@@ -24,6 +27,7 @@ const createMissileGraphic = () => {
     ])
     .fill({ color: 0x4cc9f0, alpha: 0.88 })
   graphic.blendMode = 'add'
+  graphic.visible = false
   return graphic
 }
 
@@ -45,22 +49,109 @@ const rotateVector = (x, y, angle) => ({
   y: x * Math.sin(angle) + y * Math.cos(angle),
 })
 
+const getTargetX = (target) => target?.x ?? target?.centerX ?? 0
+const getTargetY = (target) => target?.y ?? target?.centerY ?? 0
+
+const getDistanceSquaredToTarget = (x, y, target) => {
+  const dx = getTargetX(target) - x
+  const dy = getTargetY(target) - y
+  return dx * dx + dy * dy
+}
+
+const createTrail = () => {
+  const trail = new PIXI.Container()
+  const trailSegments = Array.from({ length: TRAIL_LENGTH - 1 }, () => createTrailSegment())
+  trail.visible = false
+  trailSegments.forEach((segment) => trail.addChild(segment))
+  return { trail, trailSegments }
+}
+
+const createMissileState = () => {
+  const sprite = createMissileGraphic()
+  const { trail, trailSegments } = createTrail()
+
+  return {
+    x: 0,
+    y: 0,
+    velocityX: 0,
+    velocityY: 0,
+    target: null,
+    targetX: 0,
+    targetY: 0,
+    targetFrozen: false,
+    getTargets: null,
+    trail,
+    trailSegments,
+    sprite,
+    historyX: new Float32Array(TRAIL_LENGTH),
+    historyY: new Float32Array(TRAIL_LENGTH),
+    historyCursor: 0,
+    colorOffset: 0,
+    visitedTargetIds: new Set(),
+    hitCount: 0,
+    biasX: 0,
+    biasY: 0,
+    biasStrength: MISSILE_BIAS_STRENGTH,
+  }
+}
+
 export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
   const layer = new PIXI.Container()
   const missiles = []
+  const pool = []
   parent.addChild(layer)
 
-  const removeMissile = (index) => {
+  const acquireMissile = () => {
+    const missile = pool.pop() ?? createMissileState()
+    if (!missile.sprite.parent) {
+      layer.addChild(missile.trail)
+      layer.addChild(missile.sprite)
+    }
+    missile.trail.visible = true
+    missile.sprite.visible = true
+    return missile
+  }
+
+  const releaseMissile = (index) => {
     const missile = missiles[index]
-    missile.trail.destroy({ children: true })
-    missile.sprite.destroy()
+    missile.sprite.visible = false
+    missile.trail.visible = false
+    missile.target = null
+    missile.targetFrozen = false
+    missile.getTargets = null
+    missile.hitCount = 0
+    missile.biasStrength = MISSILE_BIAS_STRENGTH
+    missile.visitedTargetIds.clear()
+
+    for (let trailIndex = 0; trailIndex < missile.trailSegments.length; trailIndex += 1) {
+      missile.trailSegments[trailIndex].visible = false
+    }
+
     missiles.splice(index, 1)
+    pool.push(missile)
+  }
+
+  const targetCache = new Map()
+
+  const getCachedTargets = (missile) => {
+    const getter = missile.getTargets
+    if (typeof getter !== 'function') {
+      return { targets: [], targetById: new Map() }
+    }
+
+    const cached = targetCache.get(getter)
+    if (cached) return cached
+
+    const targets = getter() ?? []
+    const nextCache = { targets }
+    targetCache.set(getter, nextCache)
+    return nextCache
   }
 
   const getNextTarget = (missile, excludeId = null) => {
-    const targets = missile.getTargets()
+    const { targets } = getCachedTargets(missile)
     let bestTarget = null
-    let bestDistance = Infinity
+    let bestDistanceSquared = Infinity
 
     for (let index = 0; index < targets.length; index += 1) {
       const target = targets[index]
@@ -68,9 +159,9 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
         continue
       }
 
-      const distance = Math.hypot(target.x - missile.x, target.y - missile.y)
-      if (distance < bestDistance) {
-        bestDistance = distance
+      const distanceSquared = getDistanceSquaredToTarget(missile.x, missile.y, target)
+      if (distanceSquared < bestDistanceSquared) {
+        bestDistanceSquared = distanceSquared
         bestTarget = target
       }
     }
@@ -79,50 +170,107 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
   }
 
   const findCollisionTarget = (missile) => {
-    return missile.getTargets().find((target) => {
-      if (missile.visitedTargetIds.has(target.id)) return false
-      return Math.hypot(target.x - missile.x, target.y - missile.y) <= MISSILE_HIT_RADIUS
-    })
+    const { targets } = getCachedTargets(missile)
+    const hitDistanceSquared = MISSILE_HIT_RADIUS * MISSILE_HIT_RADIUS
+
+    for (let index = 0; index < targets.length; index += 1) {
+      const target = targets[index]
+      if (missile.visitedTargetIds.has(target.id)) continue
+      if (getDistanceSquaredToTarget(missile.x, missile.y, target) <= hitDistanceSquared) {
+        return target
+      }
+    }
+
+    return null
   }
 
-  const resolveCurrentTarget = (missile) => {
-    if (!missile.target) return null
-    return missile.getTargets().find((target) => target.id === missile.target.id) ?? null
+  const setMissileTarget = (missile, target) => {
+    missile.target = target
+    missile.targetX = getTargetX(target)
+    missile.targetY = getTargetY(target)
+    missile.targetFrozen = false
+  }
+
+  const syncTargetPosition = (missile) => {
+    if (!missile.target || missile.targetFrozen) return
+    if (missile.target.health <= 0) {
+      missile.targetFrozen = true
+      return
+    }
+
+    missile.targetX = getTargetX(missile.target)
+    missile.targetY = getTargetY(missile.target)
+  }
+
+  const initializeHistory = (missile, x, y) => {
+    for (let index = 0; index < TRAIL_LENGTH; index += 1) {
+      missile.historyX[index] = x
+      missile.historyY[index] = y
+    }
+    missile.historyCursor = 0
+  }
+
+  const pushHistoryPoint = (missile, x, y) => {
+    missile.historyCursor = (missile.historyCursor + TRAIL_LENGTH - 1) % TRAIL_LENGTH
+    missile.historyX[missile.historyCursor] = x
+    missile.historyY[missile.historyCursor] = y
+  }
+
+  const updateTrail = (missile) => {
+    const segmentCount = missile.trailSegments.length
+
+    for (let trailIndex = 0; trailIndex < segmentCount; trailIndex += 1) {
+      const fromIndex = (missile.historyCursor + trailIndex) % TRAIL_LENGTH
+      const toIndex = (fromIndex + 1) % TRAIL_LENGTH
+      const fromX = missile.historyX[fromIndex]
+      const fromY = missile.historyY[fromIndex]
+      const toX = missile.historyX[toIndex]
+      const toY = missile.historyY[toIndex]
+      const segment = missile.trailSegments[trailIndex]
+      const progress = 1 - trailIndex / segmentCount
+      const dx = toX - fromX
+      const dy = toY - fromY
+      const length = Math.hypot(dx, dy)
+
+      if (length < 0.001) {
+        segment.visible = false
+        continue
+      }
+
+      segment.visible = true
+      segment.position.set(fromX, fromY)
+      segment.rotation = Math.atan2(dy, dx)
+      segment.width = length
+      segment.height = 1.5 + progress * 5
+      segment.tint = pickColor(missile.colorOffset + trailIndex)
+      segment.alpha = 0.14 + progress * 0.62
+    }
   }
 
   const spawnMissile = ({ x, y, side, colorOffset, target, getTargets }) => {
-    const sprite = createMissileGraphic()
-    const trail = new PIXI.Container()
+    const missile = acquireMissile()
     const baseDirection = normalize(side * 0.85, -1)
     const jitter = (Math.random() * 2 - 1) * MISSILE_LAUNCH_JITTER
     const jitteredDirection = rotateVector(baseDirection.x, baseDirection.y, jitter)
     const direction = normalize(jitteredDirection.x, jitteredDirection.y)
     const steeringBias = normalize(jitteredDirection.x - baseDirection.x, jitteredDirection.y - baseDirection.y)
 
-    sprite.position.set(x, y)
-    const trailSegments = Array.from({ length: TRAIL_LENGTH - 1 }, () => createTrailSegment())
-    trailSegments.forEach((segment) => trail.addChild(segment))
-    layer.addChild(trail)
-    layer.addChild(sprite)
+    missile.x = x
+    missile.y = y
+    missile.velocityX = direction.x * MISSILE_SPEED
+    missile.velocityY = direction.y * MISSILE_SPEED
+    missile.getTargets = getTargets
+    missile.colorOffset = colorOffset
+    missile.hitCount = 0
+    missile.biasX = steeringBias.x
+    missile.biasY = steeringBias.y
+    missile.biasStrength = MISSILE_BIAS_STRENGTH
+    missile.visitedTargetIds.clear()
+    setMissileTarget(missile, target)
+    initializeHistory(missile, x, y)
 
-    missiles.push({
-      x,
-      y,
-      velocityX: direction.x * MISSILE_SPEED,
-      velocityY: direction.y * MISSILE_SPEED,
-      target,
-      getTargets,
-      trail,
-      trailSegments,
-      sprite,
-      history: Array.from({ length: TRAIL_LENGTH }, () => ({ x, y })),
-      colorOffset,
-      visitedTargetIds: new Set(),
-      hitCount: 0,
-      biasX: steeringBias.x,
-      biasY: steeringBias.y,
-      biasStrength: MISSILE_BIAS_STRENGTH,
-    })
+    missile.sprite.position.set(x, y)
+    missiles.push(missile)
   }
 
   return {
@@ -133,24 +281,14 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
       spawnMissile({ x, y, side: 1, colorOffset: 3, target, getTargets })
     },
     update(deltaSeconds) {
+      targetCache.clear()
+
       for (let index = missiles.length - 1; index >= 0; index -= 1) {
         const missile = missiles[index]
+        syncTargetPosition(missile)
 
         if (missile.target) {
-          const currentTarget = resolveCurrentTarget(missile)
-
-          if (!currentTarget) {
-            missile.target = getNextTarget(missile, missile.target.id) ?? null
-          } else {
-            missile.target = currentTarget
-          }
-        }
-
-        if (missile.target) {
-          const toTarget = normalize(
-            missile.target.x - missile.x,
-            missile.target.y - missile.y,
-          )
+          const toTarget = normalize(missile.targetX - missile.x, missile.targetY - missile.y)
           const desiredDirection = normalize(
             toTarget.x + missile.biasX * missile.biasStrength,
             toTarget.y + missile.biasY * missile.biasStrength,
@@ -171,34 +309,23 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
         missile.sprite.position.set(missile.x, missile.y)
         missile.sprite.rotation = Math.atan2(missile.velocityY, missile.velocityX) + Math.PI / 2
 
-        missile.history.unshift({ x: missile.x, y: missile.y })
-        missile.history.length = TRAIL_LENGTH
+        pushHistoryPoint(missile, missile.x, missile.y)
+        updateTrail(missile)
 
-        for (let trailIndex = 0; trailIndex < missile.trailSegments.length; trailIndex += 1) {
-          const fromPoint = missile.history[trailIndex]
-          const toPoint = missile.history[trailIndex + 1]
-          const segment = missile.trailSegments[trailIndex]
-          const progress = 1 - trailIndex / missile.trailSegments.length
-          const dx = toPoint.x - fromPoint.x
-          const dy = toPoint.y - fromPoint.y
-          const length = Math.hypot(dx, dy)
+        const targetDistanceSquared = missile.target
+          ? getDistanceSquaredToTarget(missile.x, missile.y, {
+              x: missile.targetX,
+              y: missile.targetY,
+            })
+          : Infinity
 
-          if (length < 0.001) {
-            segment.visible = false
-            continue
-          }
-
-          segment.visible = true
-          segment.position.set(fromPoint.x, fromPoint.y)
-          segment.rotation = Math.atan2(dy, dx)
-          segment.width = length
-          segment.height = 1.5 + progress * 5
-          segment.tint = pickColor(missile.colorOffset + trailIndex)
-          segment.alpha = 0.14 + progress * 0.62
+        if (missile.targetFrozen && targetDistanceSquared <= MISSILE_HIT_RADIUS * MISSILE_HIT_RADIUS) {
+          setMissileTarget(missile, getNextTarget(missile, missile.target?.id ?? null) ?? null)
+          continue
         }
 
         const collisionTarget = missile.target
-          ? Math.hypot(missile.target.x - missile.x, missile.target.y - missile.y) <= MISSILE_HIT_RADIUS
+          ? !missile.targetFrozen && targetDistanceSquared <= MISSILE_HIT_RADIUS * MISSILE_HIT_RADIUS
             ? missile.target
             : findCollisionTarget(missile)
           : findCollisionTarget(missile)
@@ -209,34 +336,35 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
           const isCrit = onImpact?.({ x: missile.x, y: missile.y, target: hitTarget }) ?? false
 
           if (!isCrit) {
-            removeMissile(index)
+            releaseMissile(index)
             continue
           }
 
           missile.hitCount += 1
 
           if (missile.hitCount >= MISSILE_MAX_TRACKS) {
-            removeMissile(index)
+            releaseMissile(index)
             continue
           }
 
-          missile.target = getNextTarget(missile, hitTarget.id) ?? null
+          setMissileTarget(missile, getNextTarget(missile, hitTarget.id) ?? null)
           continue
         }
 
         if (
-          missile.x < -80 ||
-          missile.x > 1360 ||
-          missile.y < -80 ||
-          missile.y > 800
+          missile.x < -BOUNDS_PADDING ||
+          missile.x > BOUNDS_MAX_X ||
+          missile.y < -BOUNDS_PADDING ||
+          missile.y > BOUNDS_MAX_Y
         ) {
-          removeMissile(index)
+          releaseMissile(index)
         }
       }
     },
     destroy() {
-      layer.destroy({ children: true })
       missiles.length = 0
+      pool.length = 0
+      layer.destroy({ children: true })
     },
   }
 }

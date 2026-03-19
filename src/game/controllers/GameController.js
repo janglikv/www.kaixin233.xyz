@@ -29,11 +29,13 @@ const PLAYER_MAX_HEALTH = 10
 const GAME_OVER_FADE_TIME = 1.2
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const EXHAUST_0_ITEM_ID = 'exhaust-0'
+const HOMING_BURST_ITEM_ID = 'tactical-quick-wit'
 const GAME_SETTINGS_DEFAULTS = {
   gameStarted: true,
   pressureTestEnabled: false,
   equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
   equippedExhaustItemId: EXHAUST_0_ITEM_ID,
+  equippedTacticalItemId: null,
   musicEnabled: true,
   fpsEnabled: true,
   impactEffectsEnabled: true,
@@ -112,6 +114,7 @@ export class GameController {
     const normalizeGameSettings = createGameSettingsNormalizer({
       shipDefaultItemId: SHIP_DEFAULT_ITEM_ID,
       exhaustDefaultItemId: EXHAUST_0_ITEM_ID,
+      tacticalDefaultItemId: null,
       clampExhaustIndex,
     })
     const settingsSession = createGameSettingsSession({
@@ -146,6 +149,7 @@ export class GameController {
       attackPower: persistedSettings.attackPower,
       attackSpeed: persistedSettings.attackSpeed,
       critChance: persistedSettings.critChance,
+      hasHomingBurst: persistedSettings.equippedTacticalItemId === HOMING_BURST_ITEM_ID,
     }
 
     const spaceBackdrop = createSpaceBackdrop({

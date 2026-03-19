@@ -4,6 +4,7 @@ import { clampAttackPower, clampAttackSpeed, clampCritChance } from '../utils/pl
 export const createGameSettingsNormalizer = ({
   shipDefaultItemId,
   exhaustDefaultItemId,
+  tacticalDefaultItemId = null,
   clampExhaustIndex,
 }) => {
   return (settings) => ({
@@ -15,6 +16,10 @@ export const createGameSettingsNormalizer = ({
       typeof settings.equippedExhaustItemId === 'string'
         ? settings.equippedExhaustItemId
         : exhaustDefaultItemId,
+    equippedTacticalItemId:
+      typeof settings.equippedTacticalItemId === 'string'
+        ? settings.equippedTacticalItemId
+        : tacticalDefaultItemId,
     musicEnabled: Boolean(settings.musicEnabled),
     fpsEnabled: settings.fpsEnabled !== false,
     impactEffectsEnabled: settings.impactEffectsEnabled !== false,

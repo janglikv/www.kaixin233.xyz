@@ -5,6 +5,7 @@ const STORAGE_KEYS = {
   pressureTestEnabled: `${STORAGE_KEY_PREFIX}:pressureTestEnabled`,
   equippedShipItemId: `${STORAGE_KEY_PREFIX}:equippedShipItemId`,
   equippedExhaustItemId: `${STORAGE_KEY_PREFIX}:equippedExhaustItemId`,
+  equippedTacticalItemId: `${STORAGE_KEY_PREFIX}:equippedTacticalItemId`,
   musicEnabled: `${STORAGE_KEY_PREFIX}:musicEnabled`,
   fpsEnabled: `${STORAGE_KEY_PREFIX}:fpsEnabled`,
   impactEffectsEnabled: `${STORAGE_KEY_PREFIX}:impactEffectsEnabled`,

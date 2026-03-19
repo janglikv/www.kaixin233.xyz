@@ -20,6 +20,7 @@ export const createGameSessionCoordinator = ({
       attackSpeed: playerStats.attackSpeed,
       critChance: playerStats.critChance,
       exhaustIndex: currentExhaustIndex,
+      hasHomingBurst: playerStats.hasHomingBurst,
     })
   }
 
@@ -46,6 +47,7 @@ export const createGameSessionCoordinator = ({
       attackPower: playerStats.attackPower,
       attackSpeed: playerStats.attackSpeed,
       critChance: playerStats.critChance,
+      equippedTacticalItemId: settingsSession.getState().equippedTacticalItemId,
       equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
       ...patch,
     })
@@ -70,6 +72,7 @@ export const createGameSessionCoordinator = ({
       playerStats.attackPower = nextSettings.attackPower
       playerStats.attackSpeed = nextSettings.attackSpeed
       playerStats.critChance = nextSettings.critChance
+      playerStats.hasHomingBurst = nextSettings.equippedTacticalItemId === 'tactical-quick-wit'
       audio.setMusicEnabled(nextSettings.musicEnabled)
       onImpactEffectsChange?.(impactEffectsEnabled)
       syncPlayerCombat()
