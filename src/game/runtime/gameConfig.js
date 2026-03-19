@@ -10,10 +10,13 @@ export const GAME_OVER_FADE_TIME = 1.2
 export const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 export const EXHAUST_DEFAULT_ITEM_ID = 'exhaust-0'
 export const HOMING_BURST_ITEM_ID = 'tactical-quick-wit'
+export const DEBUG_SCENE_PRESSURE_TEST = 'pressure-test'
+export const DEBUG_SCENE_FIXED_TARGET = 'fixed-target'
 
-export const createGameSettingsDefaults = ({ pressureTestEnabled = false } = {}) => ({
+export const createGameSettingsDefaults = ({ pressureTestEnabled = false, debugSceneMode = null } = {}) => ({
   gameStarted: true,
   pressureTestEnabled,
+  debugSceneMode,
   equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
   equippedExhaustItemId: EXHAUST_DEFAULT_ITEM_ID,
   equippedTacticalItemId: null,

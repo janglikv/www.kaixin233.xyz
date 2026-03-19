@@ -28,6 +28,7 @@ export const createBulletSystem = (parent, options = {}) => {
   const bullets = []
   const pool = []
   let cooldown = 0
+  let wasFiring = false
   const onHit = options.onHit ?? (() => {})
   const onFire = options.onFire ?? (() => {})
   const asset = createSharedBulletAsset(options.renderer)
@@ -71,16 +72,15 @@ export const createBulletSystem = (parent, options = {}) => {
       deltaSeconds,
       { shouldFire, originX, originY, minY = -40, targets = [], fireInterval = 0.09 },
     ) {
-      cooldown -= deltaSeconds
-
       if (shouldFire && fireInterval > 0) {
+        cooldown = wasFiring ? cooldown - deltaSeconds : 0
         while (cooldown <= 0) {
           cooldown += fireInterval
           spawnBullet(originX, originY)
           onFire({ x: originX, y: originY })
         }
       } else if (!shouldFire) {
-        cooldown = Math.min(cooldown, 0)
+        cooldown = 0
       }
 
       if (shouldFire && fireInterval <= 0) {
@@ -88,6 +88,8 @@ export const createBulletSystem = (parent, options = {}) => {
         spawnBullet(originX, originY)
         onFire({ x: originX, y: originY })
       }
+
+      wasFiring = shouldFire
 
       for (let index = bullets.length - 1; index >= 0; index -= 1) {
         const bullet = bullets[index]

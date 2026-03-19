@@ -1,22 +1,27 @@
 import { useEffect, useRef, useState } from 'react'
 import { GameController } from './game/controllers/GameController'
+import { FixedTargetDebugController } from './game/controllers/FixedTargetDebugController'
 import { HomeController } from './game/controllers/HomeController'
 import { PressureTestController } from './game/controllers/PressureTestController'
+import { DEBUG_SCENE_FIXED_TARGET } from './game/runtime/gameConfig'
 import { loadGameSettings } from './game/utils/gameSettingsStorage'
 
 const getSceneState = () => {
   const settings = loadGameSettings({
     gameStarted: false,
     pressureTestEnabled: false,
+    debugSceneMode: null,
   })
 
   return {
     gameStarted: settings.gameStarted === true,
     pressureTestEnabled: settings.pressureTestEnabled === true,
+    debugSceneMode: typeof settings.debugSceneMode === 'string' ? settings.debugSceneMode : null,
   }
 }
 
 let CurrentGameController = GameController
+let CurrentFixedTargetDebugController = FixedTargetDebugController
 let CurrentHomeController = HomeController
 let CurrentPressureTestController = PressureTestController
 
@@ -27,6 +32,10 @@ if (import.meta.hot) {
   import.meta.hot.accept('./game/controllers/PressureTestController', (module) => {
     CurrentPressureTestController =
       module?.PressureTestController ?? CurrentPressureTestController
+  })
+  import.meta.hot.accept('./game/controllers/FixedTargetDebugController', (module) => {
+    CurrentFixedTargetDebugController =
+      module?.FixedTargetDebugController ?? CurrentFixedTargetDebugController
   })
   import.meta.hot.accept('./game/controllers/HomeController', (module) => {
     CurrentHomeController = module?.HomeController ?? CurrentHomeController
@@ -71,7 +80,8 @@ export default function App() {
       const nextState = getSceneState()
       setSceneState((currentState) =>
         currentState.gameStarted === nextState.gameStarted &&
-        currentState.pressureTestEnabled === nextState.pressureTestEnabled
+        currentState.pressureTestEnabled === nextState.pressureTestEnabled &&
+        currentState.debugSceneMode === nextState.debugSceneMode
           ? currentState
           : nextState,
       )
@@ -88,9 +98,12 @@ export default function App() {
 
     let ControllerClass = CurrentHomeController
     if (sceneState.gameStarted) {
-      ControllerClass = sceneState.pressureTestEnabled
-        ? CurrentPressureTestController
-        : CurrentGameController
+      ControllerClass =
+        sceneState.debugSceneMode === DEBUG_SCENE_FIXED_TARGET
+          ? CurrentFixedTargetDebugController
+          : sceneState.pressureTestEnabled
+            ? CurrentPressureTestController
+            : CurrentGameController
     }
     const controller = new ControllerClass(containerRef.current)
     controllerRef.current = controller

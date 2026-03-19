@@ -578,7 +578,8 @@ export const createSettingsOverlay = ({
   getDomRect,
   onCatalogOpen,
   onClearData,
-  onEnterDebugScene,
+  onEnterPressureTestScene,
+  onEnterFixedTargetScene,
   onLeave,
   onClose,
 }) => {
@@ -731,13 +732,21 @@ export const createSettingsOverlay = ({
     value: '重置本地存档',
     onTap: onClearData,
   })
-  const debugSceneRow = createActionRow({
+  const pressureTestSceneRow = createActionRow({
     x: PANEL_PADDING,
     y: ROW_START_Y + ROW_GAP * 6,
-    label: '调试场景',
+    label: '压测场景',
     buttonLabel: '进入',
     value: '直接进入压测场景',
-    onTap: onEnterDebugScene,
+    onTap: onEnterPressureTestScene,
+  })
+  const fixedTargetSceneRow = createActionRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y + ROW_GAP * 7,
+    label: '固定靶场',
+    buttonLabel: '进入',
+    value: '单个固定敌人，血量无限',
+    onTap: onEnterFixedTargetScene,
   })
   const leaveButton = createLargeActionButton({
     x: (width - LARGE_ACTION_WIDTH) * 0.5,
@@ -801,7 +810,8 @@ export const createSettingsOverlay = ({
     impactEffectsRow.container,
     catalogRow.container,
     clearDataRow.container,
-    debugSceneRow.container,
+    pressureTestSceneRow.container,
+    fixedTargetSceneRow.container,
   ].forEach((child) => {
     debugTabContainer.addChild(child)
   })

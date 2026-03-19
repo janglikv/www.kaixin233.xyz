@@ -1,4 +1,5 @@
 import { parseAttackPowerInput, parseAttackSpeedInput, parseCritChanceInput } from '../utils/playerStats'
+import { DEBUG_SCENE_FIXED_TARGET, DEBUG_SCENE_PRESSURE_TEST } from './gameConfig'
 
 export const createGameSessionCoordinator = ({
   normalizeGameSettings,
@@ -196,10 +197,18 @@ export const createGameSessionCoordinator = ({
         onClearData: () => {
           settingsSession.clear()
         },
-        onEnterDebugScene: () => {
+        onEnterPressureTestScene: () => {
           persistSettings({
             gameStarted: true,
             pressureTestEnabled: true,
+            debugSceneMode: DEBUG_SCENE_PRESSURE_TEST,
+          })
+        },
+        onEnterFixedTargetScene: () => {
+          persistSettings({
+            gameStarted: true,
+            pressureTestEnabled: true,
+            debugSceneMode: DEBUG_SCENE_FIXED_TARGET,
           })
         },
         onLeave: () => {

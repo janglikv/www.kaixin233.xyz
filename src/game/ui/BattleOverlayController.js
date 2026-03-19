@@ -38,7 +38,8 @@ export class BattleOverlayController {
     onSaveCritChance,
     onCatalogOpen,
     onClearData,
-    onEnterDebugScene,
+    onEnterPressureTestScene,
+    onEnterFixedTargetScene,
     onLeave,
   }) {
     this.getSettingsState = getSettingsState
@@ -137,9 +138,13 @@ export class BattleOverlayController {
         this.onUiClick?.()
         onClearData?.()
       },
-      onEnterDebugScene: () => {
+      onEnterPressureTestScene: () => {
         this.onUiClick?.()
-        onEnterDebugScene?.()
+        onEnterPressureTestScene?.()
+      },
+      onEnterFixedTargetScene: () => {
+        this.onUiClick?.()
+        onEnterFixedTargetScene?.()
       },
       onLeave: () => {
         this.onUiClick?.()

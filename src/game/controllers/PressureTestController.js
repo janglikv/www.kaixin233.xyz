@@ -1,5 +1,5 @@
 import { createPressureTestEnemyFormation } from '../enemies/createPressureTestEnemyFormation'
-import { createGameSettingsDefaults } from '../runtime/gameConfig'
+import { createGameSettingsDefaults, DEBUG_SCENE_PRESSURE_TEST } from '../runtime/gameConfig'
 import { GameController } from './GameController'
 
 export class PressureTestController extends GameController {
@@ -7,7 +7,10 @@ export class PressureTestController extends GameController {
     super(container, {
       ...options,
       settingsDefaults: {
-        ...createGameSettingsDefaults({ pressureTestEnabled: true }),
+        ...createGameSettingsDefaults({
+          pressureTestEnabled: true,
+          debugSceneMode: DEBUG_SCENE_PRESSURE_TEST,
+        }),
         ...(options.settingsDefaults ?? {}),
       },
       enemyFormationFactory: createPressureTestEnemyFormation,

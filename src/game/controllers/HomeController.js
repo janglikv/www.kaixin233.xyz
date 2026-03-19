@@ -11,6 +11,7 @@ import { createShip } from '../renderers/createShip'
 import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
+import { DEBUG_SCENE_FIXED_TARGET, DEBUG_SCENE_PRESSURE_TEST } from '../runtime/gameConfig'
 import {
   PLAYER_STATS,
   clampAttackPower,
@@ -41,6 +42,7 @@ const LOGICAL_HEIGHT = 720
 const GAME_SETTINGS_DEFAULTS = {
   gameStarted: false,
   pressureTestEnabled: false,
+  debugSceneMode: null,
   equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
   equippedExhaustItemId: EXHAUST_0_ITEM_ID,
   equippedTacticalItemId: null,
@@ -61,7 +63,8 @@ const normalizeGameSettings = (settings) => {
 
   return {
     gameStarted: settings.gameStarted === true,
-    pressureTestEnabled: settings.pressureTestEnabled !== false,
+    pressureTestEnabled: settings.pressureTestEnabled === true,
+    debugSceneMode: typeof settings.debugSceneMode === 'string' ? settings.debugSceneMode : null,
     equippedShipItemId:
       typeof settings.equippedShipItemId === 'string'
         ? settings.equippedShipItemId
@@ -780,8 +783,8 @@ const TACTICAL_ITEMS = [
   {
     id: HOMING_BURST_ITEM_ID,
     kind: 'tactical',
-    name: '急中生智',
-    description: '每100ms合并本轮暴击次数，并发射对应数量的追踪弹，自动搜寻附近后续目标。',
+    name: '暴击锁定',
+    description: '每100ms合并本轮暴击次数，并发射对应数量的追踪弹，仅锁定被暴击目标；目标丢失后直线飞行。',
     drawIcon: ({ size }) => createTacticalChipIcon({ size }),
   },
 ]
@@ -935,6 +938,7 @@ export class HomeController {
       normalizeGameSettings(loadGameSettings(GAME_SETTINGS_DEFAULTS))
     const persistedSettings = readPersistedSettings()
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
+    let debugSceneMode = persistedSettings.debugSceneMode
     let equippedState = {
       shipItemId: persistedSettings.equippedShipItemId,
       exhaustItemId: persistedSettings.equippedExhaustItemId,
@@ -955,6 +959,7 @@ export class HomeController {
 
     const applyPersistedSettings = (nextSettings) => {
       isPressureTestEnabled = nextSettings.pressureTestEnabled
+      debugSceneMode = nextSettings.debugSceneMode
       equippedState = {
         shipItemId: nextSettings.equippedShipItemId,
         exhaustItemId: nextSettings.equippedExhaustItemId,
@@ -975,6 +980,7 @@ export class HomeController {
         {
           gameStarted: false,
           pressureTestEnabled: isPressureTestEnabled,
+          debugSceneMode,
           equippedShipItemId: equippedState.shipItemId,
           equippedExhaustItemId: equippedState.exhaustItemId,
           equippedTacticalItemId: equippedState.tacticalItemId,
@@ -1140,10 +1146,18 @@ export class HomeController {
       onClearData: () => {
         clearGameSettings()
       },
-      onEnterDebugScene: () => {
+      onEnterPressureTestScene: () => {
         persistSettings({
           gameStarted: true,
           pressureTestEnabled: true,
+          debugSceneMode: DEBUG_SCENE_PRESSURE_TEST,
+        })
+      },
+      onEnterFixedTargetScene: () => {
+        persistSettings({
+          gameStarted: true,
+          pressureTestEnabled: true,
+          debugSceneMode: DEBUG_SCENE_FIXED_TARGET,
         })
       },
       onLeave: () => {
@@ -1190,9 +1204,11 @@ export class HomeController {
       onTap: () => {
         if (!canStartGame(equippedState)) return
         isPressureTestEnabled = false
+        debugSceneMode = null
         persistSettings({
           gameStarted: true,
           pressureTestEnabled: isPressureTestEnabled,
+          debugSceneMode,
         })
       },
     })

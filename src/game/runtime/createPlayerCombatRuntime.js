@@ -126,14 +126,23 @@ export const createPlayerCombatRuntime = ({
     onSpawn: () => {
       audio.playHomingLaunch()
     },
-    onImpact: ({ x, y, target }) => {
+    onImpact: ({ x, y, targetId, target }) => {
       const enemyFormation = getEnemyFormation()
       const isCrit = Math.random() < stats.critChance
-      const damagedEnemy = enemyFormation.applyDamage(target.id, stats.attackPower * (isCrit ? 2 : 1))
-      audio.playHit({ crit: isCrit })
-      spawnImpact(x, y, { scale: isCrit ? 0.56 : 0.34 })
+      const damagedEnemy =
+        targetId == null ? null : enemyFormation.applyDamage(targetId, stats.attackPower * (isCrit ? 2 : 1))
+
+      audio.playExplosion({ large: damagedEnemy?.died === true })
+      if (target) {
+        audio.playHit({ crit: isCrit })
+      }
+      spawnImpact(x, y, {
+        scale: damagedEnemy?.died ? 0.74 : isCrit ? 0.56 : 0.34,
+        flashOuterColor: 0xff8a5b,
+        flashInnerColor: 0xffe0b2,
+        sparkColors: [0xff6b35, 0xff9f68, 0xffd166],
+      })
       if (damagedEnemy?.died) {
-        audio.playExplosion({ large: true })
         spawnImpact(damagedEnemy.x, damagedEnemy.y, {
           scale: 2.7,
           flashOuterColor: 0xff5a36,
@@ -145,27 +154,13 @@ export const createPlayerCombatRuntime = ({
     },
   })
 
-  const queueHomingBurstTarget = (damagedEnemy, enemyFormation) => {
+  const queueHomingBurstTarget = (damagedEnemy) => {
     if (!damagedEnemy || !stats.hasHomingBurst) return
-
-    let followUpTarget = null
-    let followUpDistance = Infinity
-
-    enemyFormation.getHitboxes().forEach((enemy) => {
-      if (enemy.id === damagedEnemy.id) return
-      const distance = Math.hypot(enemy.centerX - damagedEnemy.x, enemy.centerY - damagedEnemy.y)
-      if (distance >= followUpDistance) return
-      followUpDistance = distance
-      followUpTarget = {
-        id: enemy.id,
-        x: enemy.centerX,
-        y: enemy.centerY,
-      }
+    pendingHomingTargets.push({
+      id: damagedEnemy.id,
+      x: damagedEnemy.x,
+      y: damagedEnemy.y,
     })
-
-    if (followUpTarget) {
-      pendingHomingTargets.push(followUpTarget)
-    }
   }
 
   const flushHomingBurstTargets = () => {
@@ -210,7 +205,7 @@ export const createPlayerCombatRuntime = ({
         })
       }
       if (!isCrit) return
-      queueHomingBurstTarget(damagedEnemy, enemyFormation)
+      queueHomingBurstTarget(damagedEnemy)
     },
   })
 

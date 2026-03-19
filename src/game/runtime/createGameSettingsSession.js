@@ -10,6 +10,7 @@ export const createGameSettingsNormalizer = ({
   return (settings) => ({
     gameStarted: settings.gameStarted !== false,
     pressureTestEnabled: settings.pressureTestEnabled === true,
+    debugSceneMode: typeof settings.debugSceneMode === 'string' ? settings.debugSceneMode : null,
     equippedShipItemId:
       typeof settings.equippedShipItemId === 'string' ? settings.equippedShipItemId : shipDefaultItemId,
     equippedExhaustItemId:
@@ -46,6 +47,7 @@ export const createGameSettingsSession = ({
     getOverlayState() {
       return {
         pressureTestEnabled: state.pressureTestEnabled,
+        debugSceneMode: state.debugSceneMode,
         musicEnabled: state.musicEnabled,
         fpsEnabled: state.fpsEnabled,
         impactEffectsEnabled: state.impactEffectsEnabled,
