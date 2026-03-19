@@ -20,6 +20,12 @@ import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
+import {
+  PLAYER_STATS,
+  clampAttackPower,
+  clampAttackSpeed,
+  clampCritChance,
+} from '../utils/playerStats'
 import { createEcsWorld, createEntity, queryEntities } from '../ecs/createEcsWorld'
 import { ecsSystemRegistry } from '../ecs/ecsSystemRegistry'
 
@@ -50,11 +56,6 @@ const PLAYER_MAX_HEALTH = 10
 const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
 const GAME_OVER_FADE_TIME = 1.2
-const PLAYER_STATS = {
-  attackPower: 1,
-  attackSpeed: 2,
-  critChance: 1,
-}
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const EXHAUST_0_ITEM_ID = 'exhaust-0'
 const GAME_SETTINGS_DEFAULTS = {
@@ -72,9 +73,6 @@ const GAME_SETTINGS_DEFAULTS = {
   exhaustIndex: 0,
 }
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
-const clampAttackPower = (value) => clamp(Math.round(value), 1, 999)
-const clampAttackSpeed = (value) => clamp(Math.round(value * 10) / 10, 1, 30)
-const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
 const clampExhaustIndex = (value) =>
   clamp(Number.isFinite(value) ? Math.floor(value) : 0, 0, Math.max(0, EXHAUST_PLUGINS.length - 1))
 

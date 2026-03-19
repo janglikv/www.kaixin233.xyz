@@ -17,6 +17,7 @@ import { BattleOverlayController } from '../ui/BattleOverlayController'
 import { GameOverOverlayController } from '../ui/GameOverOverlayController'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
+import { PLAYER_STATS } from '../utils/playerStats'
 
 const LOGICAL_WIDTH = 1280
 const LOGICAL_HEIGHT = 720
@@ -26,11 +27,6 @@ const NORMAL_ENEMY_SPAWN_X = LOGICAL_WIDTH * 0.5
 const NORMAL_ENEMY_SPAWN_Y = -92
 const PLAYER_MAX_HEALTH = 10
 const GAME_OVER_FADE_TIME = 1.2
-const PLAYER_STATS = {
-  attackPower: 1,
-  attackSpeed: 2,
-  critChance: 1,
-}
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const EXHAUST_0_ITEM_ID = 'exhaust-0'
 const GAME_SETTINGS_DEFAULTS = {

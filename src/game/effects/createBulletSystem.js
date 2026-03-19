@@ -73,8 +73,18 @@ export const createBulletSystem = (parent, options = {}) => {
     ) {
       cooldown -= deltaSeconds
 
-      if (shouldFire && cooldown <= 0) {
-        cooldown = fireInterval
+      if (shouldFire && fireInterval > 0) {
+        while (cooldown <= 0) {
+          cooldown += fireInterval
+          spawnBullet(originX, originY)
+          onFire({ x: originX, y: originY })
+        }
+      } else if (!shouldFire) {
+        cooldown = Math.min(cooldown, 0)
+      }
+
+      if (shouldFire && fireInterval <= 0) {
+        cooldown = 0
         spawnBullet(originX, originY)
         onFire({ x: originX, y: originY })
       }

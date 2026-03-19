@@ -1,9 +1,5 @@
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
-
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
-const clampAttackPower = (value) => clamp(Math.round(value), 1, 999)
-const clampAttackSpeed = (value) => clamp(Math.round(value * 10) / 10, 1, 30)
-const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
+import { clampAttackPower, clampAttackSpeed, clampCritChance } from '../utils/playerStats'
 
 export const createGameSettingsNormalizer = ({
   shipDefaultItemId,

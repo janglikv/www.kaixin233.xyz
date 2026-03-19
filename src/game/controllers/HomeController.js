@@ -11,6 +11,12 @@ import { createShip } from '../renderers/createShip'
 import { createShipScene } from '../renderers/createShipScene'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
+import {
+  PLAYER_STATS,
+  clampAttackPower,
+  clampAttackSpeed,
+  clampCritChance,
+} from '../utils/playerStats'
 
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const SHIP_FRAME_ITEM_ID = 'ship-frame-1'
@@ -28,11 +34,6 @@ const PREVIEW_EFFECT_SCALE = 0.9
 const PREVIEW_SHIP_ROTATION = 0.12
 const LOGICAL_WIDTH = 1280
 const LOGICAL_HEIGHT = 720
-const PLAYER_STATS = {
-  attackPower: 1,
-  attackSpeed: 2,
-  critChance: 1,
-}
 const GAME_SETTINGS_DEFAULTS = {
   gameStarted: false,
   pressureTestEnabled: false,
@@ -46,11 +47,6 @@ const GAME_SETTINGS_DEFAULTS = {
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
 }
-const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
-const clampAttackPower = (value) => clamp(Math.round(value), 1, 999)
-const clampAttackSpeed = (value) => clamp(Math.round(value * 10) / 10, 1, 30)
-const clampCritChance = (value) => clamp(Math.round(value * 100) / 100, 0, 1)
-
 const normalizeGameSettings = (settings) => {
   const legacyEquippedItemId =
     typeof settings.equippedItemId === 'string' ? settings.equippedItemId : null
