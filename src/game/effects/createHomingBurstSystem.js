@@ -208,6 +208,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
   }
 
   const updateTrail = (missile) => {
+    missile.trail.visible = true
     const segmentCount = missile.trailSegments.length
 
     for (let trailIndex = 0; trailIndex < segmentCount; trailIndex += 1) {

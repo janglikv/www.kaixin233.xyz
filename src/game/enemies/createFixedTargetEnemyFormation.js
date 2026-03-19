@@ -5,8 +5,14 @@ import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from '../runtime/gameConfig'
 
 const TARGET_THEME_INDEX = 3
 const TARGET_SCALE = 0.34
-const TARGET_X = LOGICAL_WIDTH * 0.5
-const TARGET_Y = LOGICAL_HEIGHT * 0.24
+const TARGET_COUNT = 48
+const TARGET_COLUMNS = 16
+const TARGET_ROWS = 3
+const TARGET_TOP_Y = LOGICAL_HEIGHT * 0.17
+const TARGET_ROW_GAP = 72
+const TARGET_ROW_WIDTH = LOGICAL_WIDTH * 0.82
+const TARGET_START_X = (LOGICAL_WIDTH - TARGET_ROW_WIDTH) * 0.5
+const TARGET_SPACING_X = TARGET_ROW_WIDTH / (TARGET_COLUMNS - 1)
 const TARGET_HITBOX_HALF_WIDTH = 42
 const TARGET_HITBOX_TOP_OFFSET = 52
 const TARGET_HITBOX_BOTTOM_OFFSET = 44
@@ -40,45 +46,60 @@ export const createFixedTargetEnemyFormation = ({ renderer, parent }) => {
     renderer,
     shipTheme: enemyCatalogEntry.theme,
   })
-  const sprite = new PIXI.Sprite(enemySpriteAsset.texture)
-  sprite.anchor.set(enemySpriteAsset.anchorX, enemySpriteAsset.anchorY)
-  sprite.position.set(TARGET_X, TARGET_Y)
-  parent.addChild(sprite)
+  const layer = new PIXI.Container()
+  const targets = Array.from({ length: TARGET_COUNT }, (_, index) => {
+    const column = index % TARGET_COLUMNS
+    const row = Math.floor(index / TARGET_COLUMNS) % TARGET_ROWS
+    const rowOffset = row % 2 === 0 ? 0 : TARGET_SPACING_X * 0.5
+    const x = TARGET_START_X + TARGET_SPACING_X * column + rowOffset
+    const y = TARGET_TOP_Y + TARGET_ROW_GAP * row
+    const sprite = new PIXI.Sprite(enemySpriteAsset.texture)
+    sprite.anchor.set(enemySpriteAsset.anchorX, enemySpriteAsset.anchorY)
+    sprite.position.set(x, y)
+    layer.addChild(sprite)
 
-  const hitbox = {
-    left: TARGET_X - TARGET_HITBOX_HALF_WIDTH,
-    right: TARGET_X + TARGET_HITBOX_HALF_WIDTH,
-    top: TARGET_Y - TARGET_HITBOX_TOP_OFFSET,
-    bottom: TARGET_Y + TARGET_HITBOX_BOTTOM_OFFSET,
-    id: 'fixed-target',
-    centerX: TARGET_X,
-    centerY: TARGET_Y + TARGET_HITBOX_CENTER_Y_OFFSET,
-    health: Number.POSITIVE_INFINITY,
-  }
+    const hitbox = {
+      left: x - TARGET_HITBOX_HALF_WIDTH,
+      right: x + TARGET_HITBOX_HALF_WIDTH,
+      top: y - TARGET_HITBOX_TOP_OFFSET,
+      bottom: y + TARGET_HITBOX_BOTTOM_OFFSET,
+      id: `fixed-target-${index}`,
+      centerX: x,
+      centerY: y + TARGET_HITBOX_CENTER_Y_OFFSET,
+      health: Number.POSITIVE_INFINITY,
+    }
+
+    return { hitbox, sprite }
+  })
+
+  parent.addChild(layer)
+  const hitboxes = targets.map((entry) => entry.hitbox)
+  const hitboxById = new Map(targets.map((entry) => [entry.hitbox.id, entry.hitbox]))
 
   return {
     getHitboxes() {
-      return [hitbox]
+      return hitboxes
     },
     getShooters() {
       return []
     },
     applyDamage(enemyId) {
-      if (enemyId !== hitbox.id) return null
+      const hitbox = hitboxById.get(enemyId)
+      if (!hitbox) return null
 
       return {
         id: hitbox.id,
         alive: true,
         died: false,
         health: Number.POSITIVE_INFINITY,
-        x: TARGET_X,
-        y: TARGET_Y + TARGET_HITBOX_CENTER_Y_OFFSET,
+        x: hitbox.centerX,
+        y: hitbox.centerY,
       }
     },
     update() {},
     destroy() {
       enemySpriteAsset.texture.destroy(true)
-      sprite.destroy()
+      layer.destroy({ children: true })
     },
   }
 }
