@@ -11,6 +11,235 @@ const ROW_START_Y = 146
 const ROW_GAP = 58
 const LARGE_ACTION_WIDTH = 260
 const LARGE_ACTION_HEIGHT = 52
+const ATTACK_SPEED_MODAL_WIDTH = 420
+const ATTACK_SPEED_MODAL_HEIGHT = 220
+const ATTACK_SPEED_INPUT_BASE_WIDTH = ATTACK_SPEED_MODAL_WIDTH - 56
+const ATTACK_SPEED_INPUT_BASE_HEIGHT = 52
+
+const createNumericEditModal = ({
+  width,
+  height,
+  titleText,
+  hintText,
+  placeholderText,
+  initialValue,
+  onConfirm,
+  getDomRect,
+}) => {
+  const overlay = new PIXI.Container()
+  overlay.visible = false
+  overlay.eventMode = 'static'
+  overlay.cursor = 'default'
+  let currentValue = initialValue
+  let inputElement = null
+  const panelX = (width - ATTACK_SPEED_MODAL_WIDTH) * 0.5
+  const panelY = (height - ATTACK_SPEED_MODAL_HEIGHT) * 0.5
+
+  const mask = new PIXI.Graphics()
+  mask.rect(0, 0, width, height).fill({ color: 0x030812, alpha: 0.72 })
+  mask.eventMode = 'static'
+  mask.cursor = 'default'
+  mask.on('pointerdown', (event) => {
+    event.stopPropagation()
+  })
+  mask.on('pointertap', (event) => {
+    event.stopPropagation()
+  })
+  overlay.addChild(mask)
+
+  const panel = new PIXI.Container()
+  panel.position.set(panelX, panelY)
+  panel.eventMode = 'static'
+  panel.cursor = 'default'
+  panel.on('pointerdown', (event) => {
+    event.stopPropagation()
+  })
+  panel.on('pointertap', (event) => {
+    event.stopPropagation()
+  })
+  overlay.addChild(panel)
+
+  const panelBg = new PIXI.Graphics()
+  panelBg
+    .roundRect(0, 0, ATTACK_SPEED_MODAL_WIDTH, ATTACK_SPEED_MODAL_HEIGHT, 24)
+    .fill({ color: 0x071221, alpha: 0.98 })
+    .stroke({ color: 0x5ca9ff, width: 2, alpha: 0.92 })
+  panel.addChild(panelBg)
+
+  const title = new PIXI.Text({
+    text: titleText,
+    style: {
+      fill: 0xf5fbff,
+      fontFamily: 'IBM Plex Mono, monospace',
+      fontSize: 24,
+      fontWeight: '700',
+    },
+  })
+  title.position.set(28, 24)
+  panel.addChild(title)
+
+  const hint = new PIXI.Text({
+    text: hintText,
+    style: {
+      fill: 0x93aed6,
+      fontFamily: 'IBM Plex Mono, monospace',
+      fontSize: 14,
+      fontWeight: '500',
+    },
+  })
+  hint.position.set(28, 58)
+  panel.addChild(hint)
+
+  const inputBackground = new PIXI.Graphics()
+  inputBackground
+    .roundRect(0, 0, ATTACK_SPEED_MODAL_WIDTH - 56, 52, 14)
+    .fill({ color: 0x0b1b36, alpha: 0.98 })
+    .stroke({ color: 0x6bb7ff, width: 2, alpha: 0.95 })
+  inputBackground.position.set(28, 92)
+  panel.addChild(inputBackground)
+
+  const errorText = new PIXI.Text({
+    text: '',
+    style: {
+      fill: 0xff8a80,
+      fontFamily: 'IBM Plex Mono, monospace',
+      fontSize: 14,
+      fontWeight: '700',
+    },
+  })
+  errorText.position.set(28, 152)
+  panel.addChild(errorText)
+
+  const destroyInputElement = () => {
+    if (!inputElement) return
+    inputElement.remove()
+    inputElement = null
+  }
+
+  const syncInputValue = (nextValue) => {
+    if (!inputElement) return
+    inputElement.value = nextValue
+  }
+
+  const createInputElement = () => {
+    if (typeof document === 'undefined' || inputElement) return
+
+    const input = document.createElement('input')
+    input.type = 'text'
+    input.inputMode = 'decimal'
+    input.placeholder = placeholderText
+    input.autocomplete = 'off'
+    input.spellcheck = false
+    input.value = currentValue
+    input.style.position = 'fixed'
+    input.style.transformOrigin = 'left top'
+    input.style.border = '2px solid #6bb7ff'
+    input.style.borderRadius = '14px'
+    input.style.background = 'rgba(11, 27, 54, 0.98)'
+    input.style.color = '#f5fbff'
+    input.style.fontFamily = 'IBM Plex Mono, monospace'
+    input.style.fontSize = '20px'
+    input.style.fontWeight = '700'
+    input.style.outline = 'none'
+    input.style.boxSizing = 'border-box'
+    input.style.zIndex = '2147483647'
+    input.style.width = `${ATTACK_SPEED_INPUT_BASE_WIDTH}px`
+    input.style.height = `${ATTACK_SPEED_INPUT_BASE_HEIGHT}px`
+    input.style.padding = '0 16px'
+    input.addEventListener('input', () => {
+      errorText.text = ''
+    })
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        submit()
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        close()
+      }
+    })
+    document.body.appendChild(input)
+    const domRect = getDomRect?.({
+      x: panelX + 28,
+      y: panelY + 92,
+      width: ATTACK_SPEED_MODAL_WIDTH - 56,
+      height: 52,
+    })
+    if (domRect) {
+      const scale = domRect.width / ATTACK_SPEED_INPUT_BASE_WIDTH
+      input.style.left = `${domRect.left}px`
+      input.style.top = `${domRect.top}px`
+      input.style.transform = `scale(${scale})`
+    } else {
+      input.style.left = '50%'
+      input.style.top = '50%'
+      input.style.transform = 'translate(-50%, -12px)'
+    }
+    input.focus()
+    input.select()
+    inputElement = input
+  }
+
+  const close = () => {
+    overlay.visible = false
+    errorText.text = ''
+    destroyInputElement()
+  }
+
+  const open = (nextValue) => {
+    currentValue = nextValue
+    errorText.text = ''
+    overlay.visible = true
+    createInputElement()
+    syncInputValue(nextValue)
+  }
+
+  const submit = () => {
+    const result = onConfirm?.(inputElement?.value ?? currentValue) ?? { ok: true }
+    if (result.ok === false) {
+      errorText.text = result.error ?? '请输入有效的攻速数值'
+      inputElement?.focus()
+      inputElement?.select()
+      return
+    }
+    close()
+  }
+
+  panel.addChild(
+    createControlButton({
+      x: ATTACK_SPEED_MODAL_WIDTH - 200,
+      y: ATTACK_SPEED_MODAL_HEIGHT - 56,
+      width: 76,
+      height: 36,
+      label: '取消',
+      onTap: close,
+    }),
+  )
+  panel.addChild(
+    createControlButton({
+      x: ATTACK_SPEED_MODAL_WIDTH - 108,
+      y: ATTACK_SPEED_MODAL_HEIGHT - 56,
+      width: 76,
+      height: 36,
+      label: '确认',
+      onTap: submit,
+      variant: 'success',
+    }),
+  )
+
+  return {
+    container: overlay,
+    open,
+    close,
+    destroy() {
+      destroyInputElement()
+    },
+    isVisible() {
+      return overlay.visible
+    },
+  }
+}
 
 const createValueText = ({ x, y, width }) => {
   const text = new PIXI.Text({
@@ -139,7 +368,16 @@ const createToggleRow = ({ x, y, label, value, onToggle }) => {
   }
 }
 
-const createStepperRow = ({ x, y, label, value, formatValue, onStep }) => {
+const createStepperActionRow = ({
+  x,
+  y,
+  label,
+  value,
+  formatValue,
+  onStep,
+  actionLabel,
+  onAction,
+}) => {
   const container = new PIXI.Container()
   const valueText = createValueText({ x: 0, y: 17, width: 412 })
 
@@ -164,6 +402,16 @@ const createStepperRow = ({ x, y, label, value, formatValue, onStep }) => {
       height: CONTROL_BUTTON_HEIGHT,
       label: '+',
       onTap: () => onStep(1),
+    }),
+  )
+  container.addChild(
+    createControlButton({
+      x: 532,
+      y: 0,
+      width: ACTION_BUTTON_WIDTH,
+      height: ACTION_BUTTON_HEIGHT,
+      label: actionLabel,
+      onTap: onAction,
     }),
   )
   valueText.text = formatValue(value)
@@ -324,6 +572,10 @@ export const createSettingsOverlay = ({
   onFpsToggle,
   onImpactEffectsToggle,
   onAdjustStat,
+  onSaveAttackPower,
+  onSaveAttackSpeed,
+  onSaveCritChance,
+  getDomRect,
   onCatalogOpen,
   onClearData,
   onEnterDebugScene,
@@ -373,6 +625,9 @@ export const createSettingsOverlay = ({
   const basicTabContainer = new PIXI.Container()
   const debugTabContainer = new PIXI.Container()
   let activeTab = 'basic'
+  let currentAttackPower = state.attackPower
+  let currentAttackSpeed = state.attackSpeed
+  let currentCritChance = state.critChance
 
   const basicTab = createTabButton({
     x: PANEL_PADDING,
@@ -424,29 +679,41 @@ export const createSettingsOverlay = ({
     value: state.impactEffectsEnabled,
     onToggle: onImpactEffectsToggle,
   })
-  const attackPowerRow = createStepperRow({
+  const attackPowerRow = createStepperActionRow({
     x: PANEL_PADDING,
     y: ROW_START_Y,
     label: '攻击力',
     value: state.attackPower,
     formatValue: (nextValue) => `${nextValue}`,
     onStep: (direction) => onAdjustStat('attackPower', direction),
+    actionLabel: '编辑',
+    onAction: () => {
+      attackPowerModal.open(String(currentAttackPower))
+    },
   })
-  const attackSpeedRow = createStepperRow({
+  const attackSpeedRow = createStepperActionRow({
     x: PANEL_PADDING,
     y: ROW_START_Y + ROW_GAP,
     label: '攻速',
     value: state.attackSpeed,
     formatValue: (nextValue) => `${nextValue.toFixed(1)}/s`,
     onStep: (direction) => onAdjustStat('attackSpeed', direction),
+    actionLabel: '编辑',
+    onAction: () => {
+      attackSpeedModal.open(String(currentAttackSpeed))
+    },
   })
-  const critChanceRow = createStepperRow({
+  const critChanceRow = createStepperActionRow({
     x: PANEL_PADDING,
     y: ROW_START_Y + ROW_GAP * 2,
     label: '暴击',
     value: state.critChance,
     formatValue: (nextValue) => `${(nextValue * 100).toFixed(0)}%`,
     onStep: (direction) => onAdjustStat('critChance', direction),
+    actionLabel: '编辑',
+    onAction: () => {
+      critChanceModal.open(String(Math.round(currentCritChance * 100)))
+    },
   })
   const catalogRow = createActionRow({
     x: PANEL_PADDING,
@@ -487,6 +754,39 @@ export const createSettingsOverlay = ({
   critChanceRow.update(state.critChance)
   catalogRow.update('查看飞船资料')
 
+  const attackPowerModal = createNumericEditModal({
+    width,
+    height,
+    titleText: '设置攻击力',
+    hintText: '输入新攻击力，确认后保存',
+    placeholderText: '例如 120',
+    initialValue: String(state.attackPower),
+    onConfirm: (value) => onSaveAttackPower?.(value) ?? { ok: true },
+    getDomRect,
+  })
+
+  const attackSpeedModal = createNumericEditModal({
+    width,
+    height,
+    titleText: '设置攻速',
+    hintText: '输入新攻速，确认后保存',
+    placeholderText: '例如 30 或 42.5',
+    initialValue: String(state.attackSpeed),
+    onConfirm: (value) => onSaveAttackSpeed?.(value) ?? { ok: true },
+    getDomRect,
+  })
+
+  const critChanceModal = createNumericEditModal({
+    width,
+    height,
+    titleText: '设置暴击',
+    hintText: '输入暴击率，支持 0-1 或 0-100',
+    placeholderText: '例如 1 或 100',
+    initialValue: String(Math.round(state.critChance * 100)),
+    onConfirm: (value) => onSaveCritChance?.(value) ?? { ok: true },
+    getDomRect,
+  })
+
   ;[
     musicRow.container,
     fpsRow.container,
@@ -509,6 +809,9 @@ export const createSettingsOverlay = ({
   container.addChild(basicTabContainer)
   container.addChild(debugTabContainer)
   basicTabContainer.addChild(leaveButton.container)
+  container.addChild(attackPowerModal.container)
+  container.addChild(attackSpeedModal.container)
+  container.addChild(critChanceModal.container)
 
   return {
     container,
@@ -523,11 +826,17 @@ export const createSettingsOverlay = ({
     },
     hide() {
       container.visible = false
+      attackPowerModal.close()
+      attackSpeedModal.close()
+      critChanceModal.close()
     },
     isVisible() {
       return container.visible
     },
     update(nextState) {
+      currentAttackPower = nextState.attackPower
+      currentAttackSpeed = nextState.attackSpeed
+      currentCritChance = nextState.critChance
       musicRow.update(nextState.musicEnabled)
       fpsRow.update(nextState.fpsEnabled)
       impactEffectsRow.update(nextState.impactEffectsEnabled)
@@ -536,6 +845,11 @@ export const createSettingsOverlay = ({
       critChanceRow.update(nextState.critChance)
       basicTabContainer.visible = activeTab === 'basic'
       debugTabContainer.visible = activeTab === 'debug'
+    },
+    destroy() {
+      attackPowerModal.destroy()
+      attackSpeedModal.destroy()
+      critChanceModal.destroy()
     },
   }
 }

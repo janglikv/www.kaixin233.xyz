@@ -25,6 +25,9 @@ import {
   clampAttackPower,
   clampAttackSpeed,
   clampCritChance,
+  parseAttackPowerInput,
+  parseAttackSpeedInput,
+  parseCritChanceInput,
 } from '../utils/playerStats'
 import { createEcsWorld, createEntity, queryEntities } from '../ecs/createEcsWorld'
 import { ecsSystemRegistry } from '../ecs/ecsSystemRegistry'
@@ -769,6 +772,15 @@ export class PressureTestController {
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
       state: getSettingsOverlayState(),
+      getDomRect: ({ x: logicalX, y: logicalY, width: logicalWidth, height: logicalHeight }) => {
+        const rect = app.canvas.getBoundingClientRect()
+        return {
+          left: rect.left + layoutOffsetX + logicalX * layoutScale,
+          top: rect.top + layoutOffsetY + logicalY * layoutScale,
+          width: logicalWidth * layoutScale,
+          height: logicalHeight * layoutScale,
+        }
+      },
       onMusicToggle: (enabled) => {
         audio.setMusicEnabled(enabled)
         if (enabled) {
@@ -804,6 +816,57 @@ export class PressureTestController {
         statsPanel.update(playerStats)
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
+      },
+      onSaveAttackPower: (value) => {
+        const nextAttackPower = parseAttackPowerInput(value)
+        if (nextAttackPower == null) {
+          return {
+            ok: false,
+            error: '请输入有效的攻击力数值',
+          }
+        }
+
+        audio.playUiClick({ high: nextAttackPower >= playerStats.attackPower })
+        playerStats.attackPower = nextAttackPower
+        statsPanel.update(playerStats)
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
+      },
+      onSaveAttackSpeed: (value) => {
+        const nextAttackSpeed = parseAttackSpeedInput(value)
+        if (nextAttackSpeed == null) {
+          return {
+            ok: false,
+            error: '请输入有效的攻速数值',
+          }
+        }
+
+        audio.playUiClick({ high: nextAttackSpeed >= playerStats.attackSpeed })
+        playerStats.attackSpeed = nextAttackSpeed
+        statsPanel.update(playerStats)
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
+      },
+      onSaveCritChance: (value) => {
+        const nextCritChance = parseCritChanceInput(value)
+        if (nextCritChance == null) {
+          return {
+            ok: false,
+            error: '请输入有效的暴击率数值',
+          }
+        }
+
+        audio.playUiClick({ high: nextCritChance >= playerStats.critChance })
+        playerStats.critChance = nextCritChance
+        statsPanel.update(playerStats)
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
       },
       onCatalogOpen: () => {
         audio.playUiClick()

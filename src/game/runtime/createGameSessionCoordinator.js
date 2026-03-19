@@ -1,3 +1,5 @@
+import { parseAttackPowerInput, parseAttackSpeedInput, parseCritChanceInput } from '../utils/playerStats'
+
 export const createGameSessionCoordinator = ({
   normalizeGameSettings,
   settingsSession,
@@ -130,6 +132,57 @@ export const createGameSessionCoordinator = ({
           syncPlayerCombat()
           onOverlayStatsChange?.(playerStats)
           persistSettings()
+        },
+        onSaveAttackPower: (value) => {
+          const nextAttackPower = parseAttackPowerInput(value)
+          if (nextAttackPower == null) {
+            return {
+              ok: false,
+              error: '请输入有效的攻击力数值',
+            }
+          }
+
+          audio.playUiClick({ high: nextAttackPower >= playerStats.attackPower })
+          playerStats.attackPower = nextAttackPower
+          syncPlayerCombat()
+          onOverlayStatsChange?.(playerStats)
+          persistSettings()
+
+          return { ok: true }
+        },
+        onSaveAttackSpeed: (value) => {
+          const nextAttackSpeed = parseAttackSpeedInput(value)
+          if (nextAttackSpeed == null) {
+            return {
+              ok: false,
+              error: '请输入有效的攻速数值',
+            }
+          }
+
+          audio.playUiClick({ high: nextAttackSpeed >= playerStats.attackSpeed })
+          playerStats.attackSpeed = nextAttackSpeed
+          syncPlayerCombat()
+          onOverlayStatsChange?.(playerStats)
+          persistSettings()
+
+          return { ok: true }
+        },
+        onSaveCritChance: (value) => {
+          const nextCritChance = parseCritChanceInput(value)
+          if (nextCritChance == null) {
+            return {
+              ok: false,
+              error: '请输入有效的暴击率数值',
+            }
+          }
+
+          audio.playUiClick({ high: nextCritChance >= playerStats.critChance })
+          playerStats.critChance = nextCritChance
+          syncPlayerCombat()
+          onOverlayStatsChange?.(playerStats)
+          persistSettings()
+
+          return { ok: true }
         },
         onCatalogOpen: (visible) => {
           persistSettings({

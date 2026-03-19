@@ -16,6 +16,9 @@ import {
   clampAttackPower,
   clampAttackSpeed,
   clampCritChance,
+  parseAttackPowerInput,
+  parseAttackSpeedInput,
+  parseCritChanceInput,
 } from '../utils/playerStats'
 
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
@@ -958,6 +961,15 @@ export class HomeController {
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
       state: getSettingsOverlayState(),
+      getDomRect: ({ x: logicalX, y: logicalY, width: logicalWidth, height: logicalHeight }) => {
+        const rect = app.canvas.getBoundingClientRect()
+        return {
+          left: rect.left + layoutOffsetX + logicalX * layoutScale,
+          top: rect.top + layoutOffsetY + logicalY * layoutScale,
+          width: logicalWidth * layoutScale,
+          height: logicalHeight * layoutScale,
+        }
+      },
       onMusicToggle: (enabled) => {
         isMusicEnabled = enabled
         persistSettings()
@@ -975,12 +987,59 @@ export class HomeController {
       },
       onAdjustStat: (key, direction) => {
         if (key === 'attackPower') attackPower = Math.max(1, Math.round(attackPower + direction))
-        if (key === 'attackSpeed') attackSpeed = Math.max(1, Math.round((attackSpeed + direction * 0.5) * 10) / 10)
+        if (key === 'attackSpeed') {
+          attackSpeed = clampAttackSpeed(attackSpeed + direction * 0.5)
+        }
         if (key === 'critChance') {
           critChance = Math.max(0, Math.min(1, Math.round((critChance + direction * 0.05) * 100) / 100))
         }
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
+      },
+      onSaveAttackPower: (value) => {
+        const nextAttackPower = parseAttackPowerInput(value)
+        if (nextAttackPower == null) {
+          return {
+            ok: false,
+            error: '请输入有效的攻击力数值',
+          }
+        }
+
+        attackPower = nextAttackPower
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
+      },
+      onSaveAttackSpeed: (value) => {
+        const nextAttackSpeed = parseAttackSpeedInput(value)
+        if (nextAttackSpeed == null) {
+          return {
+            ok: false,
+            error: '请输入有效的攻速数值',
+          }
+        }
+
+        attackSpeed = nextAttackSpeed
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
+      },
+      onSaveCritChance: (value) => {
+        const nextCritChance = parseCritChanceInput(value)
+        if (nextCritChance == null) {
+          return {
+            ok: false,
+            error: '请输入有效的暴击率数值',
+          }
+        }
+
+        critChance = nextCritChance
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
       },
       onCatalogOpen: () => {
         settingsOverlay.hide()

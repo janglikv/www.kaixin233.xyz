@@ -24,6 +24,7 @@ export class BattleOverlayController {
     initialCatalogPreviewCode = null,
     initialFpsVisible = true,
     getSettingsState,
+    getDomRect,
     onUiClick,
     onPreviewOpen,
     onPreviewClose,
@@ -32,6 +33,9 @@ export class BattleOverlayController {
     onFpsToggle,
     onImpactEffectsToggle,
     onAdjustStat,
+    onSaveAttackPower,
+    onSaveAttackSpeed,
+    onSaveCritChance,
     onCatalogOpen,
     onClearData,
     onEnterDebugScene,
@@ -86,6 +90,7 @@ export class BattleOverlayController {
       width,
       height,
       state: getSettingsState(),
+      getDomRect,
       onMusicToggle: onMusicToggle,
       onFpsToggle: (enabled) => {
         onFpsToggle?.(enabled)
@@ -95,6 +100,27 @@ export class BattleOverlayController {
       onAdjustStat: (key, direction) => {
         onAdjustStat?.(key, direction)
         this.refreshSettings()
+      },
+      onSaveAttackPower: (value) => {
+        const result = onSaveAttackPower?.(value) ?? { ok: true }
+        if (result.ok !== false) {
+          this.refreshSettings()
+        }
+        return result
+      },
+      onSaveAttackSpeed: (value) => {
+        const result = onSaveAttackSpeed?.(value) ?? { ok: true }
+        if (result.ok !== false) {
+          this.refreshSettings()
+        }
+        return result
+      },
+      onSaveCritChance: (value) => {
+        const result = onSaveCritChance?.(value) ?? { ok: true }
+        if (result.ok !== false) {
+          this.refreshSettings()
+        }
+        return result
       },
       onCatalogOpen: () => {
         this.onUiClick?.()
@@ -247,6 +273,7 @@ export class BattleOverlayController {
   }
 
   destroy() {
+    this.settingsOverlay.destroy?.()
     this.settingsButton.container.destroy({ children: true })
     this.playerHealthBar.container.destroy({ children: true })
     this.statsPanel.container.destroy({ children: true })

@@ -146,15 +146,6 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
           }
         }
 
-        if (!missile.target) {
-          missile.target = getNextTarget(missile)
-        }
-
-        if (!missile.target) {
-          removeMissile(index)
-          continue
-        }
-
         if (missile.target) {
           const toTarget = normalize(
             missile.target.x - missile.x,
@@ -206,10 +197,11 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
           segment.alpha = 0.14 + progress * 0.62
         }
 
-        const collisionTarget =
-          Math.hypot(missile.target.x - missile.x, missile.target.y - missile.y) <= MISSILE_HIT_RADIUS
+        const collisionTarget = missile.target
+          ? Math.hypot(missile.target.x - missile.x, missile.target.y - missile.y) <= MISSILE_HIT_RADIUS
             ? missile.target
             : findCollisionTarget(missile)
+          : findCollisionTarget(missile)
 
         if (collisionTarget) {
           const hitTarget = collisionTarget
@@ -229,9 +221,6 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
           }
 
           missile.target = getNextTarget(missile, hitTarget.id) ?? null
-          if (!missile.target) {
-            removeMissile(index)
-          }
           continue
         }
 

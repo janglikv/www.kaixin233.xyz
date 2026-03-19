@@ -221,7 +221,7 @@ export class GameController {
       shouldStart: (event) => {
         const rect = app.canvas.getBoundingClientRect()
         const point = sceneRuntime.toLogicalPoint(event.clientX, event.clientY, rect)
-        return !overlayController.containsInteractive(point.x, point.y)
+        return !overlayController?.containsInteractive(point.x, point.y)
       },
     })
 
@@ -236,6 +236,10 @@ export class GameController {
       initialCatalogPreviewCode: persistedSettings.catalogPreviewCode,
       initialFpsVisible: persistedSettings.fpsEnabled,
       getSettingsState: () => sessionCoordinator.getSettingsOverlayState(),
+      getDomRect: ({ x, y, width, height }) => {
+        const rect = app.canvas.getBoundingClientRect()
+        return sceneRuntime.toViewportRect(x, y, width, height, rect)
+      },
       ...sessionCoordinator.createOverlayHandlers(),
     })
     sessionCoordinator.setOverlayController(overlayController)

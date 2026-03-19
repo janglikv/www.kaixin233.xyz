@@ -52,6 +52,14 @@ export const createGameSceneRuntime = ({
         y: (clientY - rect.top - layoutOffsetY) / layoutScale,
       }
     },
+    toViewportRect(logicalX, logicalY, logicalWidth, logicalHeight, rect) {
+      return {
+        left: rect.left + layoutOffsetX + logicalX * layoutScale,
+        top: rect.top + layoutOffsetY + logicalY * layoutScale,
+        width: logicalWidth * layoutScale,
+        height: logicalHeight * layoutScale,
+      }
+    },
     destroy() {
       gameLayer.destroy({ children: true })
     },
