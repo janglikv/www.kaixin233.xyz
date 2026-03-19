@@ -2,9 +2,22 @@ import * as PIXI from 'pixi.js'
 import { createSynthAudio } from '../audio/createSynthAudio'
 import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { RiftServitorSwarm } from '../enemies/RiftServitorSwarm'
-import { SHIP_CATALOG } from '../data/shipCatalog'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createBattleFlowRuntime } from '../runtime/createBattleFlowRuntime'
+import {
+  createGameSettingsDefaults,
+  EXHAUST_DEFAULT_ITEM_ID,
+  GAME_OVER_FADE_TIME,
+  getExhaustIndexByItemId,
+  getShipThemeByItemId,
+  HOMING_BURST_ITEM_ID,
+  LOGICAL_HEIGHT,
+  LOGICAL_WIDTH,
+  PLAYER_MAX_HEALTH,
+  SHIP_DEFAULT_ITEM_ID,
+  WORLD_INSET,
+  WORLD_RADIUS,
+} from '../runtime/gameConfig'
 import { createSpaceBackdrop } from '../renderers/createSpaceBackdrop'
 import { createGameSceneRuntime } from '../runtime/createGameSceneRuntime'
 import { createGameSessionCoordinator } from '../runtime/createGameSessionCoordinator'
@@ -17,46 +30,9 @@ import { BattleOverlayController } from '../ui/BattleOverlayController'
 import { GameOverOverlayController } from '../ui/GameOverOverlayController'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
-import { PLAYER_STATS } from '../utils/playerStats'
 
-const LOGICAL_WIDTH = 1280
-const LOGICAL_HEIGHT = 720
-const WORLD_INSET = 0
-const WORLD_RADIUS = 0
 const NORMAL_ENEMY_SPAWN_X = LOGICAL_WIDTH * 0.5
 const NORMAL_ENEMY_SPAWN_Y = -92
-const PLAYER_MAX_HEALTH = 10
-const GAME_OVER_FADE_TIME = 1.2
-const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
-const EXHAUST_0_ITEM_ID = 'exhaust-0'
-const HOMING_BURST_ITEM_ID = 'tactical-quick-wit'
-const GAME_SETTINGS_DEFAULTS = {
-  gameStarted: true,
-  pressureTestEnabled: false,
-  equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
-  equippedExhaustItemId: EXHAUST_0_ITEM_ID,
-  equippedTacticalItemId: null,
-  musicEnabled: true,
-  fpsEnabled: true,
-  impactEffectsEnabled: true,
-  catalogVisible: false,
-  attackPower: PLAYER_STATS.attackPower,
-  attackSpeed: PLAYER_STATS.attackSpeed,
-  critChance: PLAYER_STATS.critChance,
-  exhaustIndex: 0,
-}
-const getShipThemeByItemId = (itemId) => {
-  if (typeof itemId !== 'string') return SHIP_CATALOG[0]?.theme
-  const serial = Number(itemId.replace('ship-frame-', ''))
-  const shipEntry = SHIP_CATALOG.find((entry) => entry.serial === serial)
-  return shipEntry?.theme ?? SHIP_CATALOG[0]?.theme
-}
-
-const getExhaustIndexByItemId = (itemId) => {
-  if (typeof itemId !== 'string') return 0
-  const index = Number(itemId.replace('exhaust-', ''))
-  return clampExhaustIndex(index)
-}
 
 const createEmptyEnemyFormation = () => ({
   getHitboxes() {
@@ -72,11 +48,28 @@ const createEmptyEnemyFormation = () => ({
   destroy() {},
 })
 
+const createDefaultEnemyFormation = ({ parent }) =>
+  new RiftServitorSwarm({
+    parent,
+    columns: 4,
+    rows: 3,
+    spawnX: NORMAL_ENEMY_SPAWN_X,
+    spawnY: NORMAL_ENEMY_SPAWN_Y,
+    spawnInterval: 1.08,
+    worldHeight: LOGICAL_HEIGHT,
+  })
+
 export class GameController {
-  constructor(container) {
+  constructor(container, options = {}) {
     this.container = container
-    this.pluginIndex = 0
-    this.spawnEnemies = true
+    this.pluginIndex = options.pluginIndex ?? 0
+    this.spawnEnemies = options.spawnEnemies !== false
+    this.settingsDefaults = {
+      ...createGameSettingsDefaults(),
+      ...(options.settingsDefaults ?? {}),
+    }
+    this.enemyFormationFactory = options.enemyFormationFactory ?? createDefaultEnemyFormation
+    this.gameOverTitle = options.gameOverTitle
     this.app = null
     this.cleanupFn = null
     this.started = false
@@ -113,17 +106,17 @@ export class GameController {
 
     const normalizeGameSettings = createGameSettingsNormalizer({
       shipDefaultItemId: SHIP_DEFAULT_ITEM_ID,
-      exhaustDefaultItemId: EXHAUST_0_ITEM_ID,
+      exhaustDefaultItemId: EXHAUST_DEFAULT_ITEM_ID,
       tacticalDefaultItemId: null,
       clampExhaustIndex,
     })
     const settingsSession = createGameSettingsSession({
       defaults: {
-        ...GAME_SETTINGS_DEFAULTS,
+        ...this.settingsDefaults,
         exhaustIndex: clampExhaustIndex(this.pluginIndex),
       },
       normalize: normalizeGameSettings,
-      getExhaustIndexByItemId,
+      getExhaustIndexByItemId: (itemId) => getExhaustIndexByItemId(itemId, clampExhaustIndex),
     })
     const persistedSettings = settingsSession.getState()
     const audio = createSynthAudio()
@@ -132,6 +125,7 @@ export class GameController {
     const playerShipTheme = getShipThemeByItemId(persistedSettings.equippedShipItemId)
     const initialEquippedExhaustIndex = getExhaustIndexByItemId(
       persistedSettings.equippedExhaustItemId,
+      clampExhaustIndex,
     )
     const sceneRuntime = createGameSceneRuntime({
       app,
@@ -158,14 +152,12 @@ export class GameController {
     })
     worldLayer.addChild(spaceBackdrop)
     const enemyFormation = this.spawnEnemies
-      ? new RiftServitorSwarm({
+      ? this.enemyFormationFactory({
+          PIXI,
           parent: worldLayer,
-          columns: 4,
-          rows: 3,
-          spawnX: NORMAL_ENEMY_SPAWN_X,
-          spawnY: NORMAL_ENEMY_SPAWN_Y,
-          spawnInterval: 1.08,
-          worldHeight: LOGICAL_HEIGHT,
+          renderer: app.renderer,
+          width: LOGICAL_WIDTH,
+          height: LOGICAL_HEIGHT,
         })
       : createEmptyEnemyFormation()
     const impactEffectSystem = createImpactEffectSystem(worldLayer)
@@ -173,6 +165,7 @@ export class GameController {
       parent: gameOverLayer,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
+      title: this.gameOverTitle,
     })
     let overlayController = null
     let isImpactEffectsEnabled = persistedSettings.impactEffectsEnabled
