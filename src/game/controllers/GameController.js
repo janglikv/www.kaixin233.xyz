@@ -48,7 +48,7 @@ const createEmptyEnemyFormation = () => ({
   destroy() {},
 })
 
-const createDefaultEnemyFormation = ({ parent }) =>
+const createDefaultEnemyFormation = ({ parent, onEnemyDeath }) =>
   new RiftServitorSwarm({
     parent,
     columns: 4,
@@ -57,6 +57,7 @@ const createDefaultEnemyFormation = ({ parent }) =>
     spawnY: NORMAL_ENEMY_SPAWN_Y,
     spawnInterval: 1.08,
     worldHeight: LOGICAL_HEIGHT,
+    onEnemyDeath,
   })
 
 export class GameController {
@@ -139,6 +140,9 @@ export class GameController {
       current: PLAYER_MAX_HEALTH,
       max: PLAYER_MAX_HEALTH,
     }
+    const playerCoins = {
+      current: persistedSettings.coinCount ?? 0,
+    }
     const playerStats = {
       attackPower: persistedSettings.attackPower,
       attackSpeed: persistedSettings.attackSpeed,
@@ -150,7 +154,10 @@ export class GameController {
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
     })
+    const coinWorldLayer = new PIXI.Container()
     worldLayer.addChild(spaceBackdrop)
+    worldLayer.addChild(coinWorldLayer)
+    let playerCombat = null
     const enemyFormation = this.spawnEnemies
       ? this.enemyFormationFactory({
           PIXI,
@@ -158,6 +165,9 @@ export class GameController {
           renderer: app.renderer,
           width: LOGICAL_WIDTH,
           height: LOGICAL_HEIGHT,
+          onEnemyDeath: ({ x, y }) => {
+            playerCombat?.spawnCoinDrop?.(x, y)
+          },
         })
       : createEmptyEnemyFormation()
     const impactEffectSystem = createImpactEffectSystem(worldLayer)
@@ -173,9 +183,10 @@ export class GameController {
       if (!isImpactEffectsEnabled && options.force !== true) return
       impactEffectSystem.spawn(x, y, options)
     }
-    const playerCombat = createPlayerCombatRuntime({
+    playerCombat = createPlayerCombatRuntime({
       PIXI,
       parent: worldLayer,
+      coinParent: coinWorldLayer,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
       renderer: app.renderer,
@@ -184,11 +195,19 @@ export class GameController {
       initialExhaustIndex: initialEquippedExhaustIndex,
       initialStats: playerStats,
       initialHealth: playerHealth,
+      initialCoinCount: playerCoins.current,
       spawnImpact,
       getEnemyFormation: () => enemyFormation,
       onHealthChange: (currentHealth, maxHealth) => {
         playerHealth.current = currentHealth
         overlayController?.updateHealth(currentHealth, maxHealth)
+      },
+      onCoinCountChange: (currentCoins) => {
+        playerCoins.current = currentCoins
+        overlayController?.setCoinCount(currentCoins)
+        settingsSession.persist({
+          coinCount: currentCoins,
+        })
       },
       onPlayerDepleted: () => {
         battleFlow?.triggerGameOver()
@@ -232,6 +251,7 @@ export class GameController {
       initialCatalogVisible: persistedSettings.catalogVisible === true,
       initialCatalogPreviewCode: persistedSettings.catalogPreviewCode,
       initialFpsVisible: persistedSettings.fpsEnabled,
+      initialCoinCount: playerCoins.current,
       getSettingsState: () => sessionCoordinator.getSettingsOverlayState(),
       getDomRect: ({ x, y, width, height }) => {
         const rect = app.canvas.getBoundingClientRect()

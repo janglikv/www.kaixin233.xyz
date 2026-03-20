@@ -23,4 +23,19 @@ export const VOID_CREATURE_CATALOG = [
   createVoidEntry(5, '虚空编钟', 'void-bell', 0x6d56ff, '悬浮重器，改写区域规则。'),
 ]
 
-export const CATALOG_ENTRIES = [...SHIP_CATALOG, ...VOID_CREATURE_CATALOG]
+const COIN_SERIAL = VOID_BASE_SERIAL + VOID_CREATURE_CATALOG.length + 1
+
+export const CATALOG_ENTRIES = [
+  ...SHIP_CATALOG,
+  ...VOID_CREATURE_CATALOG,
+  {
+    serial: COIN_SERIAL,
+    code: `#${COIN_SERIAL}`,
+    id: 'coin-drop',
+    name: '金币',
+    role: 'pickup',
+    previewKind: 'coin',
+    accent: 0xffbf1f,
+    summary: '掉落货币，拾取计数。',
+  },
+]

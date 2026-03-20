@@ -16,6 +16,7 @@ const STORAGE_KEYS = {
   attackSpeed: `${STORAGE_KEY_PREFIX}:attackSpeed`,
   critChance: `${STORAGE_KEY_PREFIX}:critChance`,
   exhaustIndex: `${STORAGE_KEY_PREFIX}:exhaustIndex`,
+  coinCount: `${STORAGE_KEY_PREFIX}:coinCount`,
 }
 
 const readLegacySettings = () => {

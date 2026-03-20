@@ -53,6 +53,7 @@ const GAME_SETTINGS_DEFAULTS = {
   attackPower: PLAYER_STATS.attackPower,
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
+  coinCount: 0,
 }
 const normalizeGameSettings = (settings) => {
   const legacyEquippedItemId =
@@ -91,6 +92,7 @@ const normalizeGameSettings = (settings) => {
     attackPower: clampAttackPower(settings.attackPower),
     attackSpeed: clampAttackSpeed(settings.attackSpeed),
     critChance: clampCritChance(settings.critChance),
+    coinCount: Number.isFinite(settings.coinCount) ? Math.max(0, Math.floor(settings.coinCount)) : 0,
   }
 }
 
@@ -956,6 +958,7 @@ export class HomeController {
     let attackPower = persistedSettings.attackPower ?? PLAYER_STATS.attackPower
     let attackSpeed = persistedSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
     let critChance = persistedSettings.critChance ?? PLAYER_STATS.critChance
+    let coinCount = persistedSettings.coinCount ?? 0
 
     const applyPersistedSettings = (nextSettings) => {
       isPressureTestEnabled = nextSettings.pressureTestEnabled
@@ -973,6 +976,7 @@ export class HomeController {
       attackPower = nextSettings.attackPower ?? PLAYER_STATS.attackPower
       attackSpeed = nextSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
       critChance = nextSettings.critChance ?? PLAYER_STATS.critChance
+      coinCount = nextSettings.coinCount ?? 0
     }
 
     const persistSettings = (overrides = {}) => {
@@ -992,6 +996,7 @@ export class HomeController {
           attackPower,
           attackSpeed,
           critChance,
+          coinCount,
           ...overrides,
         },
       )

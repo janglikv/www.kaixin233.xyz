@@ -3,6 +3,7 @@ import { createEnemyBulletSystem } from '../effects/createEnemyBulletSystem'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
 import { createHomingBurstSystem } from '../effects/createHomingBurstSystem'
 import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
+import { animateCoinDisplay, createCoinDisplay } from '../renderers/createCoinDisplay'
 import { createShipScene } from '../renderers/createShipScene'
 import { createEcsWorld, createEntity } from '../ecs/createEcsWorld'
 import { ecsSystemRegistry } from '../ecs/ecsSystemRegistry'
@@ -17,6 +18,25 @@ const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
+const COIN_PICKUP_RADIUS = 24
+const COIN_ATTRACT_RADIUS = 160
+const COIN_ATTRACT_SPEED = 520
+const COIN_PICKUP_VALUE = 1
+const COIN_SPACING = 18
+const COIN_OVERLAP_RADIUS = 14
+const COIN_SPAWN_OFFSETS = [
+  [0, 0],
+  [COIN_SPACING, 0],
+  [-COIN_SPACING, 0],
+  [0, COIN_SPACING],
+  [0, -COIN_SPACING],
+  [COIN_SPACING * 0.75, COIN_SPACING * 0.75],
+  [-COIN_SPACING * 0.75, COIN_SPACING * 0.75],
+  [COIN_SPACING * 0.75, -COIN_SPACING * 0.75],
+  [-COIN_SPACING * 0.75, -COIN_SPACING * 0.75],
+  [COIN_SPACING * 1.5, 0],
+  [-COIN_SPACING * 1.5, 0],
+]
 
 const createGameplayWorld = ({ shipScene, width, height }) => {
   const world = createEcsWorld()
@@ -67,6 +87,7 @@ export const clampExhaustIndex = (value) =>
 export const createPlayerCombatRuntime = ({
   PIXI,
   parent,
+  coinParent = parent,
   width,
   height,
   renderer,
@@ -75,9 +96,11 @@ export const createPlayerCombatRuntime = ({
   initialExhaustIndex = 0,
   initialStats,
   initialHealth,
+  initialCoinCount = 0,
   spawnImpact,
   getEnemyFormation,
   onHealthChange,
+  onCoinCountChange,
   onPlayerDepleted,
 }) => {
   const stats = {
@@ -89,6 +112,9 @@ export const createPlayerCombatRuntime = ({
   const health = {
     current: initialHealth.current,
     max: initialHealth.max,
+  }
+  const coinWallet = {
+    current: Number.isFinite(initialCoinCount) ? Math.max(0, Math.floor(initialCoinCount)) : 0,
   }
   const shipScene = createShipScene({
     x: width * 0.5,
@@ -102,7 +128,10 @@ export const createPlayerCombatRuntime = ({
     runtimeLayer: shipScene.runtimeLayer,
     initialIndex: initialExhaustIndex,
   })
+  const coinLayer = new PIXI.Container()
+  const coins = []
 
+  coinParent.addChild(coinLayer)
   parent.addChild(shipScene.shipGroup)
 
   const applyIncomingDamage = ({ damage, x, y, impactOptions = null }) => {
@@ -115,6 +144,103 @@ export const createPlayerCombatRuntime = ({
     }
     if (health.current <= 0) {
       onPlayerDepleted?.()
+    }
+  }
+
+  const isCoinSpotClear = (x, y) =>
+    coins.every((coin) => {
+      const dx = coin.x - x
+      const dy = coin.y - y
+      return dx * dx + dy * dy >= COIN_OVERLAP_RADIUS * COIN_OVERLAP_RADIUS
+    })
+
+  const findCoinSpawnPosition = (x, y) => {
+    for (let index = 0; index < COIN_SPAWN_OFFSETS.length; index += 1) {
+      const [offsetX, offsetY] = COIN_SPAWN_OFFSETS[index]
+      const nextX = x + offsetX
+      const nextY = y + offsetY
+      if (isCoinSpotClear(nextX, nextY)) {
+        return { x: nextX, y: nextY }
+      }
+    }
+
+    return {
+      x: x + COIN_SPACING * 2,
+      y,
+    }
+  }
+
+  const spawnCoin = (x, y) => {
+    const spawnPosition = findCoinSpawnPosition(x, y)
+    const coin = {
+      display: createCoinDisplay(),
+      x: spawnPosition.x,
+      y: spawnPosition.y,
+      spinPhase: Math.random() * Math.PI * 2,
+      age: 0,
+    }
+
+    coin.display.position.set(coin.x, coin.y)
+    coin.display.scale.set(1)
+    coin.display.visible = true
+    coinLayer.addChild(coin.display)
+    coins.push(coin)
+  }
+
+  const updateCoins = (deltaSeconds, playerBounds) => {
+    for (let index = coins.length - 1; index >= 0; index -= 1) {
+      const coin = coins[index]
+      coin.age += deltaSeconds
+      coin.spinPhase += deltaSeconds * 4.4
+
+      const pulse = 0.94 + Math.sin(coin.age * 14) * 0.06
+      const flip = Math.cos(coin.spinPhase)
+      const brightness = 0.72 + Math.abs(flip) * 0.28
+      animateCoinDisplay(coin.display, flip, {
+        pulse,
+        tilt: Math.sin(coin.spinPhase) * 0.04,
+      })
+      coin.display.alpha = brightness
+
+      if (playerBounds) {
+        const playerCenterX = (playerBounds.left + playerBounds.right) * 0.5
+        const playerCenterY = (playerBounds.top + playerBounds.bottom) * 0.5
+        const dx = playerCenterX - coin.x
+        const dy = playerCenterY - coin.y
+        const distance = Math.hypot(dx, dy)
+
+        if (distance <= COIN_ATTRACT_RADIUS) {
+          const step = Math.min(distance, COIN_ATTRACT_SPEED * deltaSeconds)
+          const scale = distance > 0 ? step / distance : 0
+          coin.x += dx * scale
+          coin.y += dy * scale
+        }
+      }
+
+      coin.display.position.set(coin.x, coin.y)
+
+      if (
+        playerBounds &&
+        coin.x >= playerBounds.left - COIN_PICKUP_RADIUS &&
+        coin.x <= playerBounds.right + COIN_PICKUP_RADIUS &&
+        coin.y >= playerBounds.top - COIN_PICKUP_RADIUS &&
+        coin.y <= playerBounds.bottom + COIN_PICKUP_RADIUS
+      ) {
+        coinWallet.current += COIN_PICKUP_VALUE
+        onCoinCountChange?.(coinWallet.current)
+        audio.playUiClick({ high: true })
+        spawnImpact(coin.x, coin.y, {
+          scale: 0.32,
+          flashOuterColor: 0xf5c94a,
+          flashInnerColor: 0xfff4c7,
+          sparkColors: [0xf5c94a, 0xffe08a, 0xffffff],
+        })
+        coinLayer.removeChild(coin.display)
+        coin.display.destroy()
+        coins.splice(index, 1)
+        continue
+      }
+
     }
   }
 
@@ -146,6 +272,13 @@ export const createPlayerCombatRuntime = ({
           flashInnerColor: 0xffd0a8,
           sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
         })
+        spawnImpact(damagedEnemy.x, damagedEnemy.y, {
+          scale: 0.42,
+          flashOuterColor: 0xf5c94a,
+          flashInnerColor: 0xfff4c7,
+          sparkColors: [0xf5c94a, 0xffe08a, 0xffffff],
+        })
+        spawnCoin(damagedEnemy.x, damagedEnemy.y)
       }
       return isCrit
     },
@@ -174,6 +307,13 @@ export const createPlayerCombatRuntime = ({
           flashInnerColor: 0xffd0a8,
           sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
         })
+        spawnImpact(damagedEnemy.x, damagedEnemy.y, {
+          scale: 0.42,
+          flashOuterColor: 0xf5c94a,
+          flashInnerColor: 0xfff4c7,
+          sparkColors: [0xf5c94a, 0xffe08a, 0xffffff],
+        })
+        spawnCoin(damagedEnemy.x, damagedEnemy.y)
       }
       if (!isCrit || !stats.hasHomingBurst || !damagedEnemy) return
 
@@ -233,6 +373,9 @@ export const createPlayerCombatRuntime = ({
     getHealth() {
       return health
     },
+    getCoinCount() {
+      return coinWallet.current
+    },
     setShipVisible(visible) {
       shipScene.shipGroup.visible = visible
     },
@@ -245,6 +388,13 @@ export const createPlayerCombatRuntime = ({
       stats.critChance = critChance
       stats.hasHomingBurst = hasHomingBurst === true
       exhaustSwitcher.setIndex(exhaustIndex)
+    },
+    setCoinCount(nextCoinCount) {
+      coinWallet.current = Number.isFinite(nextCoinCount) ? Math.max(0, Math.floor(nextCoinCount)) : 0
+      onCoinCountChange?.(coinWallet.current)
+    },
+    spawnCoinDrop(x, y) {
+      spawnCoin(x, y)
     },
     applyIncomingDamage,
     update(deltaSeconds, elapsedSeconds, { axis, shouldFire, gameOver }) {
@@ -284,12 +434,14 @@ export const createPlayerCombatRuntime = ({
         fireInterval: 1 / stats.attackSpeed,
       })
       homingBurstSystem.update(deltaSeconds)
+      updateCoins(deltaSeconds, gameOver ? null : this.getTargetBounds())
     },
     destroy() {
       bulletSystem.destroy()
       enemyBulletSystem.destroy()
       homingBurstSystem.destroy()
       exhaustSwitcher.destroy()
+      coinLayer.destroy({ children: true })
       shipScene.shipGroup.destroy({ children: true })
     },
   }

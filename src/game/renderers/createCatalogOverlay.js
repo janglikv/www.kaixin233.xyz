@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js'
+import { animateCoinDisplay, createCoinDisplay } from './createCoinDisplay'
 import { createShip } from './createShip'
 
 const PANEL_PADDING = 28
@@ -11,6 +12,22 @@ const GRID_START_Y = 52
 const CLOSE_SIZE = 34
 const MODAL_WIDTH = 420
 const MODAL_HEIGHT = 360
+const COIN_PREVIEW_CARD_SCALE = 2.15
+const COIN_PREVIEW_MODAL_SCALE = 4.1
+
+const createCoinPreview = (options = {}) => {
+  const root = new PIXI.Container()
+  const coin = createCoinDisplay()
+  coin.position.set(0, 2)
+  root.addChild(coin)
+  root.runtime = {
+    spin: true,
+    coin,
+    baseScaleX: 1,
+    baseScaleY: 1,
+  }
+  return root
+}
 
 const createModalCloseButton = ({ x, y, onTap }) => {
   const button = new PIXI.Container()
@@ -386,12 +403,17 @@ const createPreviewGraphic = (entry, options) => {
     return createVoidCreaturePreview(entry, options)
   }
 
+  if (entry.previewKind === 'coin') {
+    return createCoinPreview()
+  }
+
   return createShip(entry.theme).ship
 }
 
 const animatePreviewGraphic = (preview, deltaSeconds, elapsedSeconds) => {
   const gait = preview?.runtime?.gait
   const claws = preview?.runtime?.claws
+  const coin = preview?.runtime?.coin
   if (Array.isArray(gait) && gait.length > 0) {
     gait.forEach((leg) => {
       leg.node.rotation = Math.sin(elapsedSeconds * 7.6 + leg.phase) * 0.22
@@ -400,6 +422,16 @@ const animatePreviewGraphic = (preview, deltaSeconds, elapsedSeconds) => {
       claw.node.rotation = Math.sin(elapsedSeconds * 5.8 + claw.phase) * 0.18
     })
     preview.y = 10 + Math.sin(elapsedSeconds * 2.4) * 4
+  } else if (coin) {
+    const flip = Math.cos(elapsedSeconds * 3.3)
+    const baseScaleX = preview.runtime?.baseScaleX ?? 1
+    const baseScaleY = preview.runtime?.baseScaleY ?? 1
+    preview.scale.set(baseScaleX, baseScaleY)
+    animateCoinDisplay(coin, flip, {
+      pulse: 1,
+      tilt: Math.sin(elapsedSeconds * 0.9) * 0.04,
+    })
+    preview.y = Math.sin(elapsedSeconds * 2.2) * 1.5
   }
   return deltaSeconds
 }
@@ -434,8 +466,17 @@ const createPreviewCard = (entry, x, y, onOpenPreview) => {
   card.addChild(code)
 
   const preview = createPreviewGraphic(entry)
-  preview.scale.set(entry.previewKind === 'void-creature' ? 0.72 : 0.29)
-  preview.position.set(CARD_WIDTH * 0.5, entry.previewKind === 'void-creature' ? 57 : 54)
+  preview.scale.set(
+    entry.previewKind === 'void-creature'
+      ? 0.72
+      : entry.previewKind === 'coin'
+        ? COIN_PREVIEW_CARD_SCALE
+        : 0.29,
+  )
+  preview.position.set(
+    CARD_WIDTH * 0.5,
+    entry.previewKind === 'void-creature' ? 57 : entry.previewKind === 'coin' ? 52 : 54,
+  )
   card.addChild(preview)
 
   return card
@@ -555,7 +596,18 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
     }
 
     currentModalPreview = createPreviewGraphic(entry, { withGlow: false })
-    currentModalPreview.scale.set(entry.previewKind === 'void-creature' ? 2.4 : 1.1)
+    currentModalPreview.scale.set(
+      entry.previewKind === 'void-creature'
+        ? 2.4
+        : entry.previewKind === 'coin'
+          ? COIN_PREVIEW_MODAL_SCALE
+          : 1.1,
+    )
+    currentModalPreview.runtime = {
+      ...currentModalPreview.runtime,
+      baseScaleX: currentModalPreview.scale.x,
+      baseScaleY: currentModalPreview.scale.y,
+    }
     currentModalPreview.position.set(0, 10)
     modalPreviewStage.addChild(currentModalPreview)
     previewElapsedSeconds = 0

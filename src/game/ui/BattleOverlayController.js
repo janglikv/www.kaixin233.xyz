@@ -20,6 +20,7 @@ export class BattleOverlayController {
     entries,
     playerStats,
     playerHealth,
+    initialCoinCount = 0,
     initialCatalogVisible = false,
     initialCatalogPreviewCode = null,
     initialFpsVisible = true,
@@ -61,6 +62,19 @@ export class BattleOverlayController {
       width: 144,
       align: 'right',
     })
+    this.coinText = new PIXI.Text({
+      text: '',
+      style: {
+        fill: 0xf5c94a,
+        fontFamily: 'IBM Plex Mono, monospace',
+        fontSize: 16,
+        fontWeight: '700',
+        stroke: { color: 0x08101f, width: 3, join: 'round' },
+      },
+    })
+    this.coinText.anchor.set(0, 1)
+    this.coinText.position.set(18, height - 16)
+    this.setCoinCount(initialCoinCount)
 
     this.catalogOverlay = createCatalogOverlay({
       x: 0,
@@ -184,6 +198,7 @@ export class BattleOverlayController {
 
     gameLayer.addChild(this.fpsText)
     gameLayer.addChild(this.settingsButton.container)
+    gameLayer.addChild(this.coinText)
     gameLayer.addChild(this.playerHealthBar.container)
     gameLayer.addChild(this.statsPanel.container)
     gameLayer.addChild(this.catalogOverlay.container)
@@ -226,6 +241,11 @@ export class BattleOverlayController {
     this.playerHealthBar.update(current, max)
   }
 
+  setCoinCount(count) {
+    const nextCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0
+    this.coinText.text = `金币 ${nextCount}`
+  }
+
   updatePreview(deltaSeconds) {
     this.catalogOverlay.update(deltaSeconds)
   }
@@ -249,6 +269,9 @@ export class BattleOverlayController {
       this.catalogOverlay.hide()
     }
     this.settingsOverlay.update(settingsState)
+    if (typeof settingsState.coinCount === 'number') {
+      this.setCoinCount(settingsState.coinCount)
+    }
   }
 
   containsInteractive(logicalX, logicalY) {

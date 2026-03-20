@@ -30,6 +30,7 @@ export const createGameSettingsNormalizer = ({
     attackSpeed: clampAttackSpeed(settings.attackSpeed),
     critChance: clampCritChance(settings.critChance),
     exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
+    coinCount: Number.isFinite(settings.coinCount) ? Math.max(0, Math.floor(settings.coinCount)) : 0,
   })
 }
 
@@ -54,6 +55,7 @@ export const createGameSettingsSession = ({
         attackPower: state.attackPower,
         attackSpeed: state.attackSpeed,
         critChance: state.critChance,
+        coinCount: state.coinCount,
       }
     },
     getCurrentExhaustIndex() {

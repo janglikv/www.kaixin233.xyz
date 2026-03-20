@@ -64,6 +64,7 @@ export class RiftServitorSwarm {
     spawnY = -92,
     spawnInterval = 1.08,
     worldHeight = 720,
+    onEnemyDeath = null,
   }) {
     this.parent = parent
     this.columns = columns
@@ -72,6 +73,7 @@ export class RiftServitorSwarm {
     this.spawnY = spawnY
     this.spawnInterval = spawnInterval
     this.bottomLimit = worldHeight + ENEMY_RECYCLE_BUFFER
+    this.onEnemyDeath = typeof onEnemyDeath === 'function' ? onEnemyDeath : null
     this.elapsedSeconds = 0
     this.hitboxes = []
     this.enemies = []
@@ -243,6 +245,12 @@ export class RiftServitorSwarm {
           enemy.health = 0
           enemy.hitbox.health = 0
           enemy.display.visible = false
+          this.onEnemyDeath?.({
+            id: enemy.id,
+            x: enemy.x,
+            y: enemy.y + enemy.hitboxCenterYOffset,
+            reason: 'commit',
+          })
           onPlayerCollision({
             x: enemy.x,
             y: enemy.y + enemy.hitboxCenterYOffset,
@@ -293,6 +301,12 @@ export class RiftServitorSwarm {
         enemy.health = 0
         enemy.hitbox.health = 0
         enemy.display.visible = false
+        this.onEnemyDeath?.({
+          id: enemy.id,
+          x: enemy.x,
+          y: enemy.y + enemy.hitboxCenterYOffset,
+          reason: 'explode',
+        })
         onPlayerCollision({
           x: enemy.x,
           y: enemy.y + enemy.hitboxCenterYOffset,
@@ -305,6 +319,12 @@ export class RiftServitorSwarm {
         enemy.health = 0
         enemy.hitbox.health = 0
         enemy.display.visible = false
+        this.onEnemyDeath?.({
+          id: enemy.id,
+          x: enemy.x,
+          y: enemy.y + enemy.hitboxCenterYOffset,
+          reason: 'bottom',
+        })
         return
       }
 

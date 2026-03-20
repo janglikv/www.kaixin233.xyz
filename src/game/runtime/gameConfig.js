@@ -28,6 +28,7 @@ export const createGameSettingsDefaults = ({ pressureTestEnabled = false, debugS
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
   exhaustIndex: 0,
+  coinCount: 0,
 })
 
 export const getShipThemeByItemId = (itemId) => {
