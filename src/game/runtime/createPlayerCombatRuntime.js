@@ -17,7 +17,6 @@ const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
-const HOMING_BURST_INTERVAL = 0.3
 
 const createGameplayWorld = ({ shipScene, width, height }) => {
   const world = createEcsWorld()
@@ -91,8 +90,6 @@ export const createPlayerCombatRuntime = ({
     current: initialHealth.current,
     max: initialHealth.max,
   }
-  let homingBurstTimer = 0
-  const pendingHomingTargets = []
   const shipScene = createShipScene({
     x: width * 0.5,
     y: height * 0.72,
@@ -154,32 +151,6 @@ export const createPlayerCombatRuntime = ({
     },
   })
 
-  const queueHomingBurstTarget = (damagedEnemy) => {
-    if (!damagedEnemy || !stats.hasHomingBurst) return
-    pendingHomingTargets.push({
-      id: damagedEnemy.id,
-      x: damagedEnemy.x,
-      y: damagedEnemy.y,
-    })
-  }
-
-  const flushHomingBurstTargets = () => {
-    if (!stats.hasHomingBurst || pendingHomingTargets.length === 0) {
-      pendingHomingTargets.length = 0
-      return
-    }
-
-    const enemyFormation = getEnemyFormation()
-    const targets = pendingHomingTargets.splice(0, pendingHomingTargets.length)
-
-    homingBurstSystem.spawnBurst({
-      x: shipScene.shipX,
-      y: shipScene.shipY,
-      targets,
-      getTargets: () => enemyFormation.getHitboxes(),
-    })
-  }
-
   const bulletSystem = createBulletSystem(parent, {
     renderer,
     onFire: () => {
@@ -204,8 +175,21 @@ export const createPlayerCombatRuntime = ({
           sparkColors: [0xff3b30, 0xff7b54, 0xffb347],
         })
       }
-      if (!isCrit) return
-      queueHomingBurstTarget(damagedEnemy)
+      if (!isCrit || !stats.hasHomingBurst || !damagedEnemy) return
+
+      const homingEnemyFormation = getEnemyFormation()
+      homingBurstSystem.spawnBurst({
+        x: shipScene.shipX,
+        y: shipScene.shipY,
+        targets: [
+          {
+            id: damagedEnemy.id,
+            x: damagedEnemy.x,
+            y: damagedEnemy.y,
+          },
+        ],
+        getTargets: () => homingEnemyFormation.getHitboxes(),
+      })
     },
   })
 
@@ -299,11 +283,6 @@ export const createPlayerCombatRuntime = ({
         targets: enemyFormation.getHitboxes(),
         fireInterval: 1 / stats.attackSpeed,
       })
-      homingBurstTimer += deltaSeconds
-      while (homingBurstTimer >= HOMING_BURST_INTERVAL) {
-        homingBurstTimer -= HOMING_BURST_INTERVAL
-        flushHomingBurstTargets()
-      }
       homingBurstSystem.update(deltaSeconds)
     },
     destroy() {

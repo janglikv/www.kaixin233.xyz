@@ -3,7 +3,7 @@ import * as PIXI from 'pixi.js'
 const MISSILE_SPEED = 1280
 const MISSILE_TURN_RATE = 5.8
 const MISSILE_HIT_RADIUS = 24
-const TRAIL_LENGTH = 36
+const TRAIL_LENGTH = 18
 const MISSILE_LAUNCH_JITTER = 0.42
 const MISSILE_TARGET_OFFSET_RADIUS = 42
 const MISSILE_BIAS_STRENGTH = 1.08
@@ -11,9 +11,26 @@ const MISSILE_BIAS_DECAY = 0.94
 const BOUNDS_PADDING = 80
 const BOUNDS_MAX_X = 1280 + BOUNDS_PADDING
 const BOUNDS_MAX_Y = 720 + BOUNDS_PADDING
-const TRAIL_COLORS = [0xd90429, 0xf72585, 0xff9e00, 0x06d6a0, 0x118ab2, 0x8338ec]
+const TRAIL_HEAD_COLOR = 0xff2a2a
+const TRAIL_TAIL_COLOR = 0x2c0f14
+const clamp01 = (value) => Math.max(0, Math.min(1, value))
 
-const pickColor = (offset) => TRAIL_COLORS[offset % TRAIL_COLORS.length]
+const mixChannel = (from, to, amount) => Math.round(from + (to - from) * amount)
+
+const mixColor = (fromColor, toColor, amount) => {
+  const fromR = (fromColor >> 16) & 0xff
+  const fromG = (fromColor >> 8) & 0xff
+  const fromB = fromColor & 0xff
+  const toR = (toColor >> 16) & 0xff
+  const toG = (toColor >> 8) & 0xff
+  const toB = toColor & 0xff
+
+  return (
+    (mixChannel(fromR, toR, amount) << 16) |
+    (mixChannel(fromG, toG, amount) << 8) |
+    mixChannel(fromB, toB, amount)
+  )
+}
 
 const createMissileGraphic = () => {
   const graphic = new PIXI.Graphics()
@@ -234,9 +251,9 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
       segment.position.set(fromX, fromY)
       segment.rotation = Math.atan2(dy, dx)
       segment.width = length
-      segment.height = 1.5 + progress * 5
-      segment.tint = pickColor(missile.colorOffset + trailIndex)
-      segment.alpha = 0.14 + progress * 0.62
+      segment.height = 0.8 + progress * 6.8
+      segment.tint = mixColor(TRAIL_TAIL_COLOR, TRAIL_HEAD_COLOR, clamp01(progress))
+      segment.alpha = 0.03 + progress * progress * 0.92
     }
   }
 
