@@ -5,14 +5,11 @@ import { LOGICAL_HEIGHT, LOGICAL_WIDTH } from '../runtime/gameConfig'
 
 const TARGET_THEME_INDEX = 3
 const TARGET_SCALE = 0.34
-const TARGET_COUNT = 48
-const TARGET_COLUMNS = 16
-const TARGET_ROWS = 3
+const TARGET_COUNT = 20
 const TARGET_TOP_Y = LOGICAL_HEIGHT * 0.17
-const TARGET_ROW_GAP = 72
-const TARGET_ROW_WIDTH = LOGICAL_WIDTH * 0.82
+const TARGET_COLUMN_SPACING = 60
+const TARGET_ROW_WIDTH = TARGET_COLUMN_SPACING * (TARGET_COUNT - 1)
 const TARGET_START_X = (LOGICAL_WIDTH - TARGET_ROW_WIDTH) * 0.5
-const TARGET_SPACING_X = TARGET_ROW_WIDTH / (TARGET_COLUMNS - 1)
 const TARGET_HITBOX_HALF_WIDTH = 42
 const TARGET_HITBOX_TOP_OFFSET = 52
 const TARGET_HITBOX_BOTTOM_OFFSET = 44
@@ -48,11 +45,8 @@ export const createFixedTargetEnemyFormation = ({ renderer, parent }) => {
   })
   const layer = new PIXI.Container()
   const targets = Array.from({ length: TARGET_COUNT }, (_, index) => {
-    const column = index % TARGET_COLUMNS
-    const row = Math.floor(index / TARGET_COLUMNS) % TARGET_ROWS
-    const rowOffset = row % 2 === 0 ? 0 : TARGET_SPACING_X * 0.5
-    const x = TARGET_START_X + TARGET_SPACING_X * column + rowOffset
-    const y = TARGET_TOP_Y + TARGET_ROW_GAP * row
+    const x = TARGET_START_X + TARGET_COLUMN_SPACING * index
+    const y = TARGET_TOP_Y
     const sprite = new PIXI.Sprite(enemySpriteAsset.texture)
     sprite.anchor.set(enemySpriteAsset.anchorX, enemySpriteAsset.anchorY)
     sprite.position.set(x, y)

@@ -784,7 +784,7 @@ const TACTICAL_ITEMS = [
     id: HOMING_BURST_ITEM_ID,
     kind: 'tactical',
     name: '暴击锁定',
-    description: '每100ms合并本轮暴击次数，并发射对应数量的追踪弹，仅锁定被暴击目标；目标丢失后直线飞行。',
+    description: '每300ms合并本轮暴击次数，并发射对应数量的追踪弹，仅锁定被暴击目标；目标丢失后直线飞行。',
     drawIcon: ({ size }) => createTacticalChipIcon({ size }),
   },
 ]

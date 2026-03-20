@@ -220,6 +220,7 @@ export const createHomingBurstSystem = ({ parent, onImpact, onSpawn }) => {
       const toY = missile.historyY[toIndex]
       const segment = missile.trailSegments[trailIndex]
       const progress = 1 - trailIndex / segmentCount
+
       const dx = toX - fromX
       const dy = toY - fromY
       const length = Math.hypot(dx, dy)

@@ -17,7 +17,7 @@ const SHIP_BOUND_HALF_HEIGHT = 64 * SHIP_SCALE
 const WORLD_INSET = 0
 const ENEMY_ATTACK_SPEED = 1
 const ENEMY_BULLET_DAMAGE = 5
-const HOMING_BURST_INTERVAL = 0.1
+const HOMING_BURST_INTERVAL = 0.3
 
 const createGameplayWorld = ({ shipScene, width, height }) => {
   const world = createEcsWorld()

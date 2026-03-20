@@ -745,7 +745,7 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP * 7,
     label: '固定靶场',
     buttonLabel: '进入',
-    value: '48个固定敌人，血量无限',
+    value: '20个固定敌人，单排',
     onTap: onEnterFixedTargetScene,
   })
   const leaveButton = createLargeActionButton({
