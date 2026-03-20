@@ -1,4 +1,5 @@
 import * as PIXI from 'pixi.js'
+import { createModalCloseButton } from './createCatalogOverlay'
 
 const PANEL_PADDING = 28
 const CLOSE_SIZE = 34
@@ -600,28 +601,12 @@ export const createSettingsOverlay = ({
   })
   container.addChild(bg)
 
-  const closeBg = new PIXI.Graphics()
-  closeBg
-    .roundRect(width - PANEL_PADDING - CLOSE_SIZE, PANEL_PADDING, CLOSE_SIZE, CLOSE_SIZE, 10)
-    .fill({ color: 0x102347, alpha: 0.92 })
-    .stroke({ color: 0x48638f, width: 2, alpha: 0.95 })
-  closeBg.eventMode = 'static'
-  closeBg.cursor = 'pointer'
-  closeBg.on('pointertap', onClose)
-  container.addChild(closeBg)
-
-  const closeText = new PIXI.Text({
-    text: '×',
-    style: {
-      fill: 0xe9f4ff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 24,
-      fontWeight: '700',
-    },
+  const closeButton = createModalCloseButton({
+    x: width - PANEL_PADDING - CLOSE_SIZE,
+    y: PANEL_PADDING,
+    onTap: onClose,
   })
-  closeText.anchor.set(0.5)
-  closeText.position.set(width - PANEL_PADDING - CLOSE_SIZE * 0.5, PANEL_PADDING + CLOSE_SIZE * 0.5)
-  container.addChild(closeText)
+  container.addChild(closeButton)
 
   const basicTabContainer = new PIXI.Container()
   const debugTabContainer = new PIXI.Container()

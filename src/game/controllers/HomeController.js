@@ -4,7 +4,7 @@ import { SHIP_CATALOG } from '../data/shipCatalog'
 import { PLAYER_SHIP_THEME } from '../data/shipCatalog'
 import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
-import { createCatalogOverlay } from '../renderers/createCatalogOverlay'
+import { createCatalogOverlay, createModalCloseButton } from '../renderers/createCatalogOverlay'
 import { createSettingsButton } from '../renderers/createSettingsButton'
 import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
 import { createShip } from '../renderers/createShip'
@@ -544,31 +544,15 @@ const createItemDetailModal = ({ width, height, onToggleEquip }) => {
   })
   container.addChild(panel)
 
-  const closeButton = new PIXI.Graphics()
-  closeButton
-    .roundRect(panelWidth - 58, 18, 40, 40, 12)
-    .fill({ color: 0x132745, alpha: 0.96 })
-    .stroke({ color: 0x5c86bc, width: 2, alpha: 0.96 })
-  closeButton.eventMode = 'static'
-  closeButton.cursor = 'pointer'
-  closeButton.on('pointertap', (event) => {
-    event.stopPropagation()
-    container.visible = false
-  })
-  panel.addChild(closeButton)
-
-  const closeText = new PIXI.Text({
-    text: '×',
-    style: {
-      fill: 0xeaf6ff,
-      fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 24,
-      fontWeight: '700',
+  const closeButton = createModalCloseButton({
+    x: panelWidth - 51,
+    y: 21,
+    onTap: (event) => {
+      event.stopPropagation()
+      container.visible = false
     },
   })
-  closeText.anchor.set(0.5)
-  closeText.position.set(panelWidth - 38, 38)
-  panel.addChild(closeText)
+  panel.addChild(closeButton)
 
   const previewFrame = new PIXI.Graphics()
   previewFrame

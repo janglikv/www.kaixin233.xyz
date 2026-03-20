@@ -29,7 +29,7 @@ const createCoinPreview = (options = {}) => {
   return root
 }
 
-const createModalCloseButton = ({ x, y, onTap }) => {
+export const createModalCloseButton = ({ x, y, onTap }) => {
   const button = new PIXI.Container()
   const glow = new PIXI.Graphics()
   const bg = new PIXI.Graphics()
@@ -522,6 +522,8 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
   modalMask
     .rect(0, 0, width, height)
     .fill({ color: 0x020611, alpha: 0.72 })
+  modalMask.eventMode = 'static'
+  modalMask.cursor = 'default'
   modalMask.on('pointertap', (event) => {
     event.stopPropagation()
     closePreviewModal()
