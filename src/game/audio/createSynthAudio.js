@@ -350,17 +350,19 @@ const createGameOverBuffer = (context) =>
     softClip(right)
   })
 
-const createMusicBuffer = (context) =>
-  createBuffer(context, 8, ({ left, right, sampleRate }) => {
+const createMusicBuffer = (context) => {
+  const beat = 60 / 152
+  const bar = beat * 4
+  const progression = [
+    [73.42, 146.83, [293.66, 349.23, 440]],
+    [58.27, 116.54, [233.08, 293.66, 349.23]],
+    [87.31, 174.61, [349.23, 440, 523.25]],
+    [65.41, 130.81, [261.63, 311.13, 392]],
+  ]
+  const loopDuration = progression.length * bar
+
+  return createBuffer(context, loopDuration, ({ left, right, sampleRate }) => {
     const random = createDeterministicRandom(7719)
-    const beat = 60 / 152
-    const bar = beat * 4
-    const progression = [
-      [73.42, 146.83, [293.66, 349.23, 440]],
-      [58.27, 116.54, [233.08, 293.66, 349.23]],
-      [87.31, 174.61, [349.23, 440, 523.25]],
-      [65.41, 130.81, [261.63, 311.13, 392]],
-    ]
 
     for (let barIndex = 0; barIndex < progression.length; barIndex += 1) {
       const [bassRoot, kickRoot, chord] = progression[barIndex]
@@ -379,7 +381,7 @@ const createMusicBuffer = (context) =>
           decay: 0.05,
           sustain: 0.22,
           release: 0.04,
-          gain: 0.16,
+          gain: 0.26,
           pan: step % 2 === 0 ? -0.04 : 0.04,
           wave: 'saw',
         })
@@ -398,7 +400,7 @@ const createMusicBuffer = (context) =>
           decay: 0.06,
           sustain: 0.14,
           release: 0.04,
-          gain: 0.22,
+          gain: 0.34,
           wave: 'triangle',
         })
       }
@@ -417,7 +419,7 @@ const createMusicBuffer = (context) =>
           decay: 0.05,
           sustain: 0.04,
           release: 0.03,
-          gain: 0.07,
+          gain: 0.12,
           pan: arpIndex % 2 === 0 ? -0.18 : 0.18,
           wave: 'square',
         })
@@ -433,7 +435,7 @@ const createMusicBuffer = (context) =>
           duration: 0.04,
           attack: 0.001,
           decay: 0.03,
-          gain: 0.05,
+          gain: 0.08,
           lowpass: 0.55,
         })
       }
@@ -453,7 +455,7 @@ const createMusicBuffer = (context) =>
         decay: 0.06,
         sustain: 0.1,
         release: 0.04,
-        gain: 0.06,
+        gain: 0.11,
         pan: index % 2 === 0 ? 0.12 : -0.12,
         wave: 'triangle',
       })
@@ -462,6 +464,7 @@ const createMusicBuffer = (context) =>
     softClip(left)
     softClip(right)
   })
+}
 
 export const createSynthAudio = () => {
   let context = null
@@ -496,7 +499,7 @@ export const createSynthAudio = () => {
       masterGain.connect(context.destination)
 
       musicGain = context.createGain()
-      musicGain.gain.value = 0.66
+      musicGain.gain.value = 1
       musicGain.connect(masterGain)
     }
 
@@ -532,7 +535,7 @@ export const createSynthAudio = () => {
 
   const ready = () => unlocked && context && bufferBank
   const getMasterTargetGain = () => (musicEnabled ? 0.64 : 0)
-  const getMusicTargetGain = () => (musicEnabled ? 0.36 : 0)
+  const getMusicTargetGain = () => (musicEnabled ? 0.72 : 0)
 
   const stopMusic = () => {
     if (!musicSource) return
