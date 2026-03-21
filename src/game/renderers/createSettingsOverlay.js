@@ -10,12 +10,12 @@ const ACTION_BUTTON_HEIGHT = 36
 const TAB_Y = 84
 const ROW_START_Y = 146
 const ROW_GAP = 58
-const LARGE_ACTION_WIDTH = 260
-const LARGE_ACTION_HEIGHT = 52
 const ATTACK_SPEED_MODAL_WIDTH = 420
 const ATTACK_SPEED_MODAL_HEIGHT = 220
 const ATTACK_SPEED_INPUT_BASE_WIDTH = ATTACK_SPEED_MODAL_WIDTH - 56
 const ATTACK_SPEED_INPUT_BASE_HEIGHT = 52
+const LARGE_ACTION_WIDTH = 260
+const LARGE_ACTION_HEIGHT = 52
 
 const createNumericEditModal = ({
   width,
@@ -576,6 +576,7 @@ export const createSettingsOverlay = ({
   onSaveAttackPower,
   onSaveAttackSpeed,
   onSaveCritChance,
+  onSaveCoinCount,
   getDomRect,
   onCatalogOpen,
   onClearData,
@@ -583,6 +584,7 @@ export const createSettingsOverlay = ({
   onEnterFixedTargetScene,
   onLeave,
   onClose,
+  showLeaveButton = true,
 }) => {
   const container = new PIXI.Container()
   container.position.set(x, y)
@@ -614,6 +616,7 @@ export const createSettingsOverlay = ({
   let currentAttackPower = state.attackPower
   let currentAttackSpeed = state.attackSpeed
   let currentCritChance = state.critChance
+  let currentCoinCount = state.coinCount ?? 0
 
   const basicTab = createTabButton({
     x: PANEL_PADDING,
@@ -660,7 +663,7 @@ export const createSettingsOverlay = ({
   })
   const impactEffectsRow = createToggleRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 3,
+    y: ROW_START_Y + ROW_GAP * 4,
     label: '爆炸效果',
     value: state.impactEffectsEnabled,
     onToggle: onImpactEffectsToggle,
@@ -701,9 +704,21 @@ export const createSettingsOverlay = ({
       critChanceModal.open(String(Math.round(currentCritChance * 100)))
     },
   })
+  const coinCountRow = createStepperActionRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y + ROW_GAP * 3,
+    label: '金币',
+    value: Math.max(0, Math.floor(state.coinCount ?? 0)),
+    formatValue: (nextValue) => `${Math.max(0, Math.floor(nextValue ?? 0))}`,
+    onStep: (direction) => onAdjustStat('coinCount', direction),
+    actionLabel: '编辑',
+    onAction: () => {
+      coinCountModal.open(String(currentCoinCount))
+    },
+  })
   const catalogRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 4,
+    y: ROW_START_Y + ROW_GAP * 5,
     label: '资料库',
     buttonLabel: '打开',
     value: '查看飞船资料',
@@ -711,7 +726,7 @@ export const createSettingsOverlay = ({
   })
   const clearDataRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 5,
+    y: ROW_START_Y + ROW_GAP * 6,
     label: '清空数据',
     buttonLabel: '执行',
     value: '重置本地存档',
@@ -719,7 +734,7 @@ export const createSettingsOverlay = ({
   })
   const pressureTestSceneRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 6,
+    y: ROW_START_Y + ROW_GAP * 7,
     label: '压测场景',
     buttonLabel: '进入',
     value: '直接进入压测场景',
@@ -727,7 +742,7 @@ export const createSettingsOverlay = ({
   })
   const fixedTargetSceneRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 7,
+    y: ROW_START_Y + ROW_GAP * 8,
     label: '固定靶场',
     buttonLabel: '进入',
     value: '20个固定敌人，单排',
@@ -742,7 +757,6 @@ export const createSettingsOverlay = ({
     onTap: onLeave,
     variant: 'success',
   })
-
   attackPowerRow.update(state.attackPower)
   attackSpeedRow.update(state.attackSpeed)
   critChanceRow.update(state.critChance)
@@ -781,6 +795,17 @@ export const createSettingsOverlay = ({
     getDomRect,
   })
 
+  const coinCountModal = createNumericEditModal({
+    width,
+    height,
+    titleText: '设置金币',
+    hintText: '输入新的金币数量，保存到本地存档',
+    placeholderText: '例如 999',
+    initialValue: String(Math.max(0, Math.floor(state.coinCount ?? 0))),
+    onConfirm: (value) => onSaveCoinCount?.(value) ?? { ok: true },
+    getDomRect,
+  })
+
   ;[
     musicRow.container,
     fpsRow.container,
@@ -792,6 +817,7 @@ export const createSettingsOverlay = ({
     attackPowerRow.container,
     attackSpeedRow.container,
     critChanceRow.container,
+    coinCountRow.container,
     impactEffectsRow.container,
     catalogRow.container,
     clearDataRow.container,
@@ -803,10 +829,13 @@ export const createSettingsOverlay = ({
   debugTabContainer.visible = false
   container.addChild(basicTabContainer)
   container.addChild(debugTabContainer)
-  basicTabContainer.addChild(leaveButton.container)
+  if (showLeaveButton) {
+    basicTabContainer.addChild(leaveButton.container)
+  }
   container.addChild(attackPowerModal.container)
   container.addChild(attackSpeedModal.container)
   container.addChild(critChanceModal.container)
+  container.addChild(coinCountModal.container)
 
   return {
     container,
@@ -824,6 +853,7 @@ export const createSettingsOverlay = ({
       attackPowerModal.close()
       attackSpeedModal.close()
       critChanceModal.close()
+      coinCountModal.close()
     },
     isVisible() {
       return container.visible
@@ -832,12 +862,14 @@ export const createSettingsOverlay = ({
       currentAttackPower = nextState.attackPower
       currentAttackSpeed = nextState.attackSpeed
       currentCritChance = nextState.critChance
+      currentCoinCount = Math.max(0, Math.floor(nextState.coinCount ?? 0))
       musicRow.update(nextState.musicEnabled)
       fpsRow.update(nextState.fpsEnabled)
       impactEffectsRow.update(nextState.impactEffectsEnabled)
       attackPowerRow.update(nextState.attackPower)
       attackSpeedRow.update(nextState.attackSpeed)
       critChanceRow.update(nextState.critChance)
+      coinCountRow.update(currentCoinCount)
       basicTabContainer.visible = activeTab === 'basic'
       debugTabContainer.visible = activeTab === 'debug'
     },
@@ -845,6 +877,7 @@ export const createSettingsOverlay = ({
       attackPowerModal.destroy()
       attackSpeedModal.destroy()
       critChanceModal.destroy()
+      coinCountModal.destroy()
     },
   }
 }

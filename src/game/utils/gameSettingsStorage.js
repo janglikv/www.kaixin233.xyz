@@ -17,6 +17,7 @@ const STORAGE_KEYS = {
   critChance: `${STORAGE_KEY_PREFIX}:critChance`,
   exhaustIndex: `${STORAGE_KEY_PREFIX}:exhaustIndex`,
   coinCount: `${STORAGE_KEY_PREFIX}:coinCount`,
+  purchasedItemIds: `${STORAGE_KEY_PREFIX}:purchasedItemIds`,
 }
 
 const readLegacySettings = () => {

@@ -4,6 +4,7 @@ import { SHIP_CATALOG } from '../data/shipCatalog'
 import { PLAYER_SHIP_THEME } from '../data/shipCatalog'
 import { EXHAUST_PLUGINS } from '../effects/exhaustPlugins'
 import { createExhaustSwitcher } from '../effects/createExhaustSwitcher'
+import { createCoinDisplay } from '../renderers/createCoinDisplay'
 import { createCatalogOverlay, createModalCloseButton } from '../renderers/createCatalogOverlay'
 import { createSettingsButton } from '../renderers/createSettingsButton'
 import { createSettingsOverlay } from '../renderers/createSettingsOverlay'
@@ -26,14 +27,15 @@ const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 const SHIP_FRAME_ITEM_ID = 'ship-frame-1'
 const EXHAUST_0_ITEM_ID = 'exhaust-0'
 const EXHAUST_1_ITEM_ID = 'exhaust-1'
+const BASIC_EXHAUST_ITEM_ID = 'exhaust-5'
 const HOMING_BURST_ITEM_ID = 'tactical-quick-wit'
+const ITEM_PRICE = 100
+const ITEM_SELL_RATE = 0.7
 const SHIP_DEFAULT_ITEM_NAME = '机体 #0'
 const SHIP_DEFAULT_ITEM_DESCRIPTION = '默认机体，维持当前基础机身外观，适合常规出击。'
 const SHIP_FRAME_ITEM_NAME = '机体 #1'
 const SHIP_FRAME_ITEM_DESCRIPTION = '标准机体组件，外观采用 #1 样式，可用于正常出击。'
 const SHIP_FRAME_THEME = SHIP_CATALOG[1]?.theme ?? PLAYER_SHIP_THEME
-const EXHAUST_0_PLUGIN = EXHAUST_PLUGINS[0]
-const EXHAUST_1_PLUGIN = EXHAUST_PLUGINS[1]
 const PREVIEW_THRUST_DISTANCE = 76 * 1.02
 const PREVIEW_EFFECT_SCALE = 0.9
 const PREVIEW_SHIP_ROTATION = 0.12
@@ -44,7 +46,7 @@ const GAME_SETTINGS_DEFAULTS = {
   pressureTestEnabled: false,
   debugSceneMode: null,
   equippedShipItemId: SHIP_DEFAULT_ITEM_ID,
-  equippedExhaustItemId: EXHAUST_0_ITEM_ID,
+  equippedExhaustItemId: BASIC_EXHAUST_ITEM_ID,
   equippedTacticalItemId: null,
   musicEnabled: true,
   fpsEnabled: true,
@@ -54,6 +56,7 @@ const GAME_SETTINGS_DEFAULTS = {
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
   coinCount: 0,
+  purchasedItemIds: [],
 }
 const normalizeGameSettings = (settings) => {
   const legacyEquippedItemId =
@@ -61,29 +64,36 @@ const normalizeGameSettings = (settings) => {
   const legacyItem = legacyEquippedItemId
     ? INVENTORY_ITEMS?.find?.((item) => item.id === legacyEquippedItemId) ?? null
     : null
+  const purchasedItemIds = Array.isArray(settings.purchasedItemIds)
+    ? [...new Set(settings.purchasedItemIds.filter((itemId) => typeof itemId === 'string'))]
+    : []
+  const ownedItemIds = getOwnedItemIds(purchasedItemIds)
+  const equippedShipItemId =
+    typeof settings.equippedShipItemId === 'string'
+      ? settings.equippedShipItemId
+      : legacyItem?.kind === 'ship'
+        ? legacyItem.id
+        : SHIP_DEFAULT_ITEM_ID
+  const equippedExhaustItemId =
+    typeof settings.equippedExhaustItemId === 'string'
+      ? settings.equippedExhaustItemId
+      : legacyItem?.kind === 'exhaust'
+        ? legacyItem.id
+        : BASIC_EXHAUST_ITEM_ID
+  const equippedTacticalItemId =
+    typeof settings.equippedTacticalItemId === 'string'
+      ? settings.equippedTacticalItemId
+      : legacyItem?.kind === 'tactical'
+        ? legacyItem.id
+        : null
 
   return {
     gameStarted: settings.gameStarted === true,
     pressureTestEnabled: settings.pressureTestEnabled === true,
     debugSceneMode: typeof settings.debugSceneMode === 'string' ? settings.debugSceneMode : null,
-    equippedShipItemId:
-      typeof settings.equippedShipItemId === 'string'
-        ? settings.equippedShipItemId
-        : legacyItem?.kind === 'ship'
-          ? legacyItem.id
-          : SHIP_DEFAULT_ITEM_ID,
-    equippedExhaustItemId:
-      typeof settings.equippedExhaustItemId === 'string'
-        ? settings.equippedExhaustItemId
-        : legacyItem?.kind === 'exhaust'
-          ? legacyItem.id
-          : EXHAUST_0_ITEM_ID,
-    equippedTacticalItemId:
-      typeof settings.equippedTacticalItemId === 'string'
-        ? settings.equippedTacticalItemId
-        : legacyItem?.kind === 'tactical'
-          ? legacyItem.id
-          : null,
+    equippedShipItemId: ownedItemIds.has(equippedShipItemId) ? equippedShipItemId : SHIP_DEFAULT_ITEM_ID,
+    equippedExhaustItemId: ownedItemIds.has(equippedExhaustItemId) ? equippedExhaustItemId : BASIC_EXHAUST_ITEM_ID,
+    equippedTacticalItemId: ownedItemIds.has(equippedTacticalItemId) ? equippedTacticalItemId : null,
     musicEnabled: Boolean(settings.musicEnabled),
     fpsEnabled: settings.fpsEnabled !== false,
     impactEffectsEnabled: settings.impactEffectsEnabled !== false,
@@ -93,6 +103,7 @@ const normalizeGameSettings = (settings) => {
     attackSpeed: clampAttackSpeed(settings.attackSpeed),
     critChance: clampCritChance(settings.critChance),
     coinCount: Number.isFinite(settings.coinCount) ? Math.max(0, Math.floor(settings.coinCount)) : 0,
+    purchasedItemIds,
   }
 }
 
@@ -122,23 +133,55 @@ const createPanelFrame = ({ x, y, width, height, radius = 26 }) => {
   return container
 }
 
-const createSectionTitle = ({ text, x, y }) => {
+const createHomePanelTab = ({ x, y, label, active = false, onTap }) => {
   const container = new PIXI.Container()
-  container.position.set(x, y)
-
-  const title = new PIXI.Text({
-    text,
+  const bg = new PIXI.Graphics()
+  const text = new PIXI.Text({
+    text: label,
     style: {
       fill: 0xeaf6ff,
       fontFamily: 'IBM Plex Mono, monospace',
-      fontSize: 22,
+      fontSize: 21,
       fontWeight: '700',
-      letterSpacing: 2,
+      letterSpacing: 1.4,
     },
   })
-  container.addChild(title)
+  let currentActive = active
 
-  return container
+  const draw = (hovered = false) => {
+    bg
+      .clear()
+      .roundRect(0, 0, 114, 46, 15)
+      .fill({
+        color: currentActive ? 0x184886 : hovered ? 0x133155 : 0x0b1830,
+        alpha: currentActive ? 0.98 : 0.92,
+      })
+      .stroke({
+        color: currentActive ? 0xa8ebff : hovered ? 0x7fcfff : 0x35557f,
+        width: currentActive ? 2.4 : 2,
+        alpha: 0.95,
+      })
+  }
+
+  draw(false)
+  container.position.set(x, y)
+  container.eventMode = 'static'
+  container.cursor = 'pointer'
+  text.anchor.set(0.5)
+  text.position.set(57, 23)
+  container.addChild(bg)
+  container.addChild(text)
+  container.on('pointertap', onTap)
+  container.on('pointerover', () => draw(true))
+  container.on('pointerout', () => draw(false))
+
+  return {
+    container,
+    setActive(nextActive) {
+      currentActive = nextActive
+      draw(false)
+    },
+  }
 }
 
 const createShipPreviewPanel = ({ x, y, width, height }) => {
@@ -511,7 +554,7 @@ const createModalButton = ({ x, y, width, height, label, onTap, variant = 'prima
   }
 }
 
-const createItemDetailModal = ({ width, height, onToggleEquip }) => {
+const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, onSellItem }) => {
   const container = new PIXI.Container()
   container.visible = false
 
@@ -607,40 +650,89 @@ const createItemDetailModal = ({ width, height, onToggleEquip }) => {
   panel.addChild(descText)
 
   const actionButton = createModalButton({
-    x: (panelWidth - 220) * 0.5,
+    x: 124,
     y: panelHeight - 84,
     width: 220,
     height: 52,
     label: '装备',
     onTap: () => {
       if (!currentItem) return
-      onToggleEquip(currentItem.id)
+      if (currentMode === 'shop') {
+        if (currentOwned) return
+        const result = onPurchaseItem?.(currentItem.id)
+        if (result?.ok === false) {
+          statusText.text = result.message ?? '当前状态: 购买失败'
+          return
+        }
+      } else {
+        onToggleEquip(currentItem.id)
+      }
       container.visible = false
     },
   })
   panel.addChild(actionButton.container)
 
+  const sellButton = createModalButton({
+    x: panelWidth - 344,
+    y: panelHeight - 84,
+    width: 220,
+    height: 52,
+    label: '出售',
+    variant: 'secondary',
+    onTap: () => {
+      if (!currentItem) return
+      const result = onSellItem?.(currentItem.id)
+      if (result?.ok === false) {
+        statusText.text = result.message ?? '当前状态: 出售失败'
+        return
+      }
+      container.visible = false
+    },
+  })
+  panel.addChild(sellButton.container)
+
   let currentItem = null
   let currentIcon = null
+  let currentMode = 'warehouse'
+  let currentOwned = false
 
   return {
     container,
     hide() {
       container.visible = false
     },
-    update(item, equippedState) {
+    update(item, equippedState, options = {}) {
+      const { mode = 'warehouse', purchasedItemIds = [] } = options
+      const owned = isItemOwned(item, purchasedItemIds)
+      const equipped = isItemEquipped(item, equippedState)
+
       currentItem = item
+      currentMode = mode
+      currentOwned = owned
       titleText.text = item.name
-      statusText.text = isItemEquipped(item, equippedState) ? '当前状态: 已装备' : '当前状态: 未装备'
+      statusText.text =
+        mode === 'shop'
+          ? owned
+            ? '当前状态: 已拥有'
+            : `当前状态: 售价 ${item.price ?? ITEM_PRICE} 金币`
+          : equipped
+            ? '当前状态: 已装备'
+            : '当前状态: 未装备'
       descText.text = item.description
-      actionButton.setLabel(isItemEquipped(item, equippedState) ? '取消装备' : '装备')
+      actionButton.setLabel(
+        mode === 'shop' ? (owned ? '已拥有' : `购买 ${item.price ?? ITEM_PRICE}`) : equipped ? '取消装备' : '装备',
+      )
+      sellButton.container.visible = mode === 'warehouse' && owned && !isBaseWarehouseItem(item)
+      if (sellButton.container.visible) {
+        sellButton.setLabel(`出售 ${getItemSellPrice(item)}`)
+      }
 
       if (currentIcon) {
         iconHost.removeChild(currentIcon.container)
         currentIcon.container.destroy({ children: true })
       }
       currentIcon = item.drawIcon({ size: 196 })
-      currentIcon.update?.(isItemEquipped(item, equippedState))
+      currentIcon.update?.(equipped || owned)
       iconHost.addChild(currentIcon.container)
       container.visible = true
     },
@@ -654,7 +746,7 @@ const createItemDetailModal = ({ width, height, onToggleEquip }) => {
   }
 }
 
-const createInventorySlot = ({ x, y, size, equipped, drawIcon, onTap }) => {
+const createInventorySlot = ({ x, y, size, equipped, drawIcon, price = null, onTap }) => {
   const scale = size / 184
   const slot = new PIXI.Container()
   slot.position.set(x, y)
@@ -664,6 +756,16 @@ const createInventorySlot = ({ x, y, size, equipped, drawIcon, onTap }) => {
   const bg = new PIXI.Graphics()
   const icon = drawIcon({ size })
   const badge = new PIXI.Graphics()
+  const priceText = new PIXI.Text({
+    text: '',
+    style: {
+      fill: 0xffde7a,
+      fontFamily: 'IBM Plex Mono, monospace',
+      fontSize: 14,
+      fontWeight: '700',
+      letterSpacing: 0.8,
+    },
+  })
 
   const draw = (hovered = false, isEquipped = equipped) => {
     bg
@@ -691,12 +793,22 @@ const createInventorySlot = ({ x, y, size, equipped, drawIcon, onTap }) => {
       .lineTo(size - 32 * scale, 36 * scale)
       .lineTo(size - 18 * scale, 18 * scale)
       .stroke({ color: 0x3a2400, width: 3 * scale, alpha: 1, cap: 'round', join: 'round' })
+
+    if (price != null) {
+      priceText.visible = true
+      priceText.text = `${price}`
+      priceText.anchor.set(0.5)
+      priceText.position.set(size * 0.5, size + 34 * scale)
+    } else {
+      priceText.visible = false
+    }
   }
 
   draw(false, equipped)
   slot.addChild(bg)
   slot.addChild(icon.container)
   slot.addChild(badge)
+  slot.addChild(priceText)
   slot.on('pointertap', () => {
     onTap?.()
   })
@@ -780,6 +892,20 @@ const INVENTORY_ITEMS = [
   ...EXHAUST_ITEMS,
   ...TACTICAL_ITEMS,
 ]
+const WAREHOUSE_ITEM_IDS = new Set([SHIP_DEFAULT_ITEM_ID, BASIC_EXHAUST_ITEM_ID])
+const SHOP_ITEMS = INVENTORY_ITEMS.filter((item) => !WAREHOUSE_ITEM_IDS.has(item.id)).map((item) => ({
+  ...item,
+  price: ITEM_PRICE,
+}))
+const ITEM_BY_ID = new Map([...INVENTORY_ITEMS, ...SHOP_ITEMS].map((item) => [item.id, item]))
+
+const getOwnedItemIds = (purchasedItemIds = []) =>
+  new Set([...WAREHOUSE_ITEM_IDS, ...purchasedItemIds.filter((itemId) => ITEM_BY_ID.has(itemId))])
+
+const isItemOwned = (item, purchasedItemIds = []) => getOwnedItemIds(purchasedItemIds).has(item.id)
+const isBaseWarehouseItem = (item) => WAREHOUSE_ITEM_IDS.has(item.id)
+const getItemPrice = (item) => item.price ?? ITEM_PRICE
+const getItemSellPrice = (item) => Math.floor(getItemPrice(item) * ITEM_SELL_RATE)
 
 const isItemEquipped = (item, equippedState) => {
   if (item.kind === 'ship') return equippedState.shipItemId === item.id
@@ -823,57 +949,188 @@ const getPreviewExhaustIndex = (equippedState) => {
   return Number.isInteger(exhaustItem?.pluginIndex) ? exhaustItem.pluginIndex : null
 }
 
-const createInventoryPanel = ({ x, y, width, height, equippedState, onSelectItem }) => {
+const createInventoryPanel = ({
+  x,
+  y,
+  width,
+  height,
+  equippedState,
+  coinCount = 0,
+  purchasedItemIds = [],
+  onSelectItem,
+}) => {
   const container = createPanelFrame({ x, y, width, height })
-  const slots = []
+  let currentEquippedState = equippedState
+  let currentPurchasedItemIds = purchasedItemIds
   const slotSize = 94
   const colGap = 14
-  const rowGap = 22
+  const rowGap = 42
   const columns = 6
-
-  container.addChild(
-    createSectionTitle({
-      text: '物品',
-      x: 28,
-      y: 12,
-    }),
-  )
-
-  INVENTORY_ITEMS.forEach((item, index) => {
-    const column = index % columns
-    const row = Math.floor(index / columns)
-    const slot = createInventorySlot({
-      x: 36 + column * (slotSize + colGap),
-      y: 64 + row * (slotSize + rowGap),
-      size: slotSize,
-      equipped: isItemEquipped(item, equippedState),
-      drawIcon: item.drawIcon,
-      onTap: () => {
-        onSelectItem(item)
-      },
-    })
-    slots.push({
-      id: item.id,
-      slot,
-    })
-    container.addChild(slot.container)
+  const warehouseContent = new PIXI.Container()
+  const shopContent = new PIXI.Container()
+  const slotEntries = []
+  const coinDisplay = createCoinDisplay()
+  const coinText = new PIXI.Text({
+    text: '',
+    style: {
+      fill: 0xffe28a,
+      fontFamily: 'IBM Plex Mono, monospace',
+      fontSize: 20,
+      fontWeight: '700',
+      letterSpacing: 1,
+    },
   })
+  const shopHint = new PIXI.Text({
+    text: '商城建设中',
+    style: {
+      fill: 0xffde7a,
+      fontFamily: '"Noto Sans SC", "Microsoft YaHei", sans-serif',
+      fontSize: 30,
+      fontWeight: '900',
+      letterSpacing: 1.2,
+    },
+  })
+  const shopSubHint = new PIXI.Text({
+    text: '后续会在这里开放道具购买与解锁。',
+    style: {
+      fill: 0x9ec8ef,
+      fontFamily: '"Noto Sans SC", "Microsoft YaHei", sans-serif',
+      fontSize: 18,
+      fontWeight: '600',
+    },
+  })
+  const warehouseTab = createHomePanelTab({
+    x: 24,
+    y: 16,
+    label: '仓库',
+    active: true,
+    onTap: () => {
+      showWarehouse()
+    },
+  })
+  const shopTab = createHomePanelTab({
+    x: 148,
+    y: 16,
+    label: '商城',
+    active: false,
+    onTap: () => {
+      showShop()
+    },
+  })
+
+  const showWarehouse = () => {
+      warehouseContent.visible = true
+      shopContent.visible = false
+      warehouseTab.setActive(true)
+      shopTab.setActive(false)
+  }
+
+  const showShop = () => {
+      warehouseContent.visible = false
+      shopContent.visible = true
+      warehouseTab.setActive(false)
+      shopTab.setActive(true)
+  }
+
+  container.addChild(warehouseTab.container)
+  container.addChild(shopTab.container)
+
+  coinDisplay.scale.set(1.05)
+  container.addChild(coinDisplay)
+
+  coinText.anchor.set(1, 0.5)
+  coinText.position.set(width - 28, 36)
+  container.addChild(coinText)
+
+  const setCoinCount = (nextCoinCount) => {
+    coinText.text = `${Math.max(0, Math.floor(nextCoinCount ?? 0))}`
+    coinDisplay.position.set(coinText.x - coinText.width - 26, 36)
+  }
+  setCoinCount(coinCount)
+
+  const clearSlots = () => {
+    slotEntries.forEach(({ slot, targetContainer }) => {
+      targetContainer.removeChild(slot.container)
+      slot.destroy?.()
+    })
+    slotEntries.length = 0
+  }
+
+  const appendSlots = (items, targetContainer, mode) => {
+    items.forEach((item, index) => {
+      const column = index % columns
+      const row = Math.floor(index / columns)
+      const slot = createInventorySlot({
+        x: 36 + column * (slotSize + colGap),
+        y: 86 + row * (slotSize + rowGap),
+        size: slotSize,
+        equipped: isItemEquipped(item, currentEquippedState),
+        drawIcon: item.drawIcon,
+        price: mode === 'shop' ? item.price ?? ITEM_PRICE : null,
+        onTap: () => {
+          onSelectItem(item, mode)
+        },
+      })
+      slotEntries.push({
+        item,
+        slot,
+        targetContainer,
+      })
+      targetContainer.addChild(slot.container)
+    })
+  }
+
+  shopHint.anchor.set(0.5)
+  shopHint.position.set(width * 0.5, 282)
+  shopSubHint.anchor.set(0.5)
+  shopSubHint.position.set(width * 0.5, 328)
+
+  const renderItems = (nextEquippedState, nextPurchasedItemIds = []) => {
+    currentEquippedState = nextEquippedState
+    currentPurchasedItemIds = nextPurchasedItemIds
+    clearSlots()
+    const ownedItemIds = getOwnedItemIds(currentPurchasedItemIds)
+    const warehouseItems = INVENTORY_ITEMS.filter((item) => ownedItemIds.has(item.id))
+    const shopItems = SHOP_ITEMS
+
+    appendSlots(warehouseItems, warehouseContent, 'warehouse')
+    appendSlots(shopItems, shopContent, 'shop')
+
+    if (shopItems.length === 0) {
+      if (!shopContent.children.includes(shopHint)) {
+        shopContent.addChild(shopHint)
+        shopContent.addChild(shopSubHint)
+      }
+    } else {
+      if (shopHint.parent === shopContent) {
+        shopContent.removeChild(shopHint)
+      }
+      if (shopSubHint.parent === shopContent) {
+        shopContent.removeChild(shopSubHint)
+      }
+    }
+  }
+
+  showWarehouse()
+  container.addChild(warehouseContent)
+  container.addChild(shopContent)
+  renderItems(equippedState, purchasedItemIds)
 
   return {
     container,
-    update(nextEquippedState) {
-      slots.forEach(({ id, slot }) => {
-        const item = INVENTORY_ITEMS.find((entry) => entry.id === id)
-        slot.update(item ? isItemEquipped(item, nextEquippedState) : false)
-      })
+    setCoinCount,
+    showWarehouse,
+    showShop,
+    update(nextEquippedState, nextPurchasedItemIds = currentPurchasedItemIds) {
+      renderItems(nextEquippedState, nextPurchasedItemIds)
     },
     tick(deltaSeconds) {
-      slots.forEach(({ slot }) => {
+      slotEntries.forEach(({ slot }) => {
         slot.tick?.(deltaSeconds)
       })
     },
     destroy() {
-      slots.forEach(({ slot }) => {
+      slotEntries.forEach(({ slot }) => {
         slot.destroy?.()
       })
     },
@@ -943,6 +1200,7 @@ export class HomeController {
     let attackSpeed = persistedSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
     let critChance = persistedSettings.critChance ?? PLAYER_STATS.critChance
     let coinCount = persistedSettings.coinCount ?? 0
+    let purchasedItemIds = persistedSettings.purchasedItemIds ?? []
 
     const applyPersistedSettings = (nextSettings) => {
       isPressureTestEnabled = nextSettings.pressureTestEnabled
@@ -961,6 +1219,7 @@ export class HomeController {
       attackSpeed = nextSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
       critChance = nextSettings.critChance ?? PLAYER_STATS.critChance
       coinCount = nextSettings.coinCount ?? 0
+      purchasedItemIds = nextSettings.purchasedItemIds ?? []
     }
 
     const persistSettings = (overrides = {}) => {
@@ -981,6 +1240,7 @@ export class HomeController {
           attackSpeed,
           critChance,
           coinCount,
+          purchasedItemIds,
           ...overrides,
         },
       )
@@ -1036,12 +1296,14 @@ export class HomeController {
       attackPower,
       attackSpeed,
       critChance,
+      coinCount,
     })
     const settingsOverlay = createSettingsOverlay({
       x: 0,
       y: 0,
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
+      showLeaveButton: false,
       state: getSettingsOverlayState(),
       getDomRect: ({ x: logicalX, y: logicalY, width: logicalWidth, height: logicalHeight }) => {
         const rect = app.canvas.getBoundingClientRect()
@@ -1074,6 +1336,10 @@ export class HomeController {
         }
         if (key === 'critChance') {
           critChance = Math.max(0, Math.min(1, Math.round((critChance + direction * 0.05) * 100) / 100))
+        }
+        if (key === 'coinCount') {
+          coinCount = Math.max(0, Math.floor(coinCount + direction))
+          inventoryPanel.setCoinCount(coinCount)
         }
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
@@ -1119,6 +1385,22 @@ export class HomeController {
 
         critChance = nextCritChance
         persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
+      },
+      onSaveCoinCount: (value) => {
+        const nextCoinCount = Number(value)
+        if (!Number.isFinite(nextCoinCount) || nextCoinCount < 0) {
+          return {
+            ok: false,
+            error: '请输入有效的非负金币数值',
+          }
+        }
+
+        coinCount = Math.floor(nextCoinCount)
+        persistSettings()
+        inventoryPanel.setCoinCount(coinCount)
         settingsOverlay.update(getSettingsOverlayState())
 
         return { ok: true }
@@ -1175,12 +1457,79 @@ export class HomeController {
         const selectedItem = INVENTORY_ITEMS.find((item) => item.id === itemId)
         if (!selectedItem) return
         equippedState = toggleEquippedItem(selectedItem, equippedState)
-        inventoryPanel.update(equippedState)
+        inventoryPanel.update(equippedState, purchasedItemIds)
         previewPanel.setTheme(getPreviewShipTheme(equippedState))
         previewPanel.setExhaustIndex(getPreviewExhaustIndex(equippedState))
         startButton.setEnabled(canStartGame(equippedState))
-        itemDetailModal.update(selectedItem, equippedState)
+        itemDetailModal.update(selectedItem, equippedState, {
+          mode: 'warehouse',
+          purchasedItemIds,
+        })
         persistSettings()
+      },
+      onPurchaseItem: (itemId) => {
+        const selectedItem = ITEM_BY_ID.get(itemId)
+        if (!selectedItem) {
+          return { ok: false, message: '当前状态: 物品不存在' }
+        }
+        if (isItemOwned(selectedItem, purchasedItemIds)) {
+          return { ok: false, message: '当前状态: 已拥有' }
+        }
+        if (coinCount < (selectedItem.price ?? ITEM_PRICE)) {
+          return { ok: false, message: '当前状态: 金币不足' }
+        }
+
+        coinCount -= selectedItem.price ?? ITEM_PRICE
+        purchasedItemIds = [...new Set([...purchasedItemIds, itemId])]
+        inventoryPanel.setCoinCount(coinCount)
+        inventoryPanel.update(equippedState, purchasedItemIds)
+        inventoryPanel.showWarehouse()
+        settingsOverlay.update(getSettingsOverlayState())
+        persistSettings()
+        return { ok: true }
+      },
+      onSellItem: (itemId) => {
+        const selectedItem = ITEM_BY_ID.get(itemId)
+        if (!selectedItem) {
+          return { ok: false, message: '当前状态: 物品不存在' }
+        }
+        if (isBaseWarehouseItem(selectedItem)) {
+          return { ok: false, message: '当前状态: 基础物品不可出售' }
+        }
+        if (!purchasedItemIds.includes(itemId)) {
+          return { ok: false, message: '当前状态: 仅可出售已购买物品' }
+        }
+
+        coinCount += getItemSellPrice(selectedItem)
+        purchasedItemIds = purchasedItemIds.filter((ownedItemId) => ownedItemId !== itemId)
+
+        if (selectedItem.kind === 'ship' && equippedState.shipItemId === itemId) {
+          equippedState = {
+            ...equippedState,
+            shipItemId: SHIP_DEFAULT_ITEM_ID,
+          }
+        }
+        if (selectedItem.kind === 'exhaust' && equippedState.exhaustItemId === itemId) {
+          equippedState = {
+            ...equippedState,
+            exhaustItemId: BASIC_EXHAUST_ITEM_ID,
+          }
+        }
+        if (selectedItem.kind === 'tactical' && equippedState.tacticalItemId === itemId) {
+          equippedState = {
+            ...equippedState,
+            tacticalItemId: null,
+          }
+        }
+
+        inventoryPanel.setCoinCount(coinCount)
+        inventoryPanel.update(equippedState, purchasedItemIds)
+        previewPanel.setTheme(getPreviewShipTheme(equippedState))
+        previewPanel.setExhaustIndex(getPreviewExhaustIndex(equippedState))
+        startButton.setEnabled(canStartGame(equippedState))
+        settingsOverlay.update(getSettingsOverlayState())
+        persistSettings()
+        return { ok: true }
       },
     })
 
@@ -1210,10 +1559,16 @@ export class HomeController {
       width: 702,
       height: 674,
       equippedState,
-      onSelectItem: (item) => {
-        itemDetailModal.update(item, equippedState)
+      coinCount,
+      purchasedItemIds,
+      onSelectItem: (item, mode) => {
+        itemDetailModal.update(item, equippedState, {
+          mode,
+          purchasedItemIds,
+        })
       },
     })
+    inventoryPanel.setCoinCount(coinCount)
     gameLayer.addChild(inventoryPanel.container)
     gameLayer.addChild(catalogOverlay.container)
     gameLayer.addChild(settingsOverlay.container)
@@ -1221,7 +1576,8 @@ export class HomeController {
 
     const syncFromStorage = () => {
       applyPersistedSettings(readPersistedSettings())
-      inventoryPanel.update(equippedState)
+      inventoryPanel.update(equippedState, purchasedItemIds)
+      inventoryPanel.setCoinCount(coinCount)
       previewPanel.setTheme(getPreviewShipTheme(equippedState))
       previewPanel.setExhaustIndex(getPreviewExhaustIndex(equippedState))
       startButton.setEnabled(canStartGame(equippedState))
