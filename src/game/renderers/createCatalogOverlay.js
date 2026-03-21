@@ -15,7 +15,7 @@ const MODAL_HEIGHT = 360
 const COIN_PREVIEW_CARD_SCALE = 2.15
 const COIN_PREVIEW_MODAL_SCALE = 4.1
 
-const createCoinPreview = (options = {}) => {
+const createCoinPreview = () => {
   const root = new PIXI.Container()
   const coin = createCoinDisplay()
   coin.position.set(0, 2)
@@ -110,7 +110,6 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
   const shellDark = 0x12091f
   const shellMid = 0x1c0f2d
   const shellLight = 0x26163f
-  const connectorColor = 0x5a2ea6
   const voidGlow = 0xd9a8ff
   const voidHot = 0xf1d6ff
   const shadow = new PIXI.Graphics()
@@ -153,6 +152,19 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       claw.addChild(graphic)
       return claw
     }
+    const createConnector = (points, pivotX, pivotY, fillColor, parent = connectors) => {
+      const connector = new PIXI.Container()
+      const graphic = new PIXI.Graphics()
+      graphic
+        .poly(points)
+        .fill({ color: fillColor, alpha: 0.98 })
+        .stroke({ color: accent, width: 1.4, alpha: 0.68 })
+      connector.pivot.set(pivotX, pivotY)
+      connector.position.set(pivotX, pivotY)
+      connector.addChild(graphic)
+      parent.addChild(connector)
+      return connector
+    }
 
     glow.blendMode = 'add'
     glow
@@ -164,6 +176,8 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       .poly([-2, -22, -6, -12, -6, 0, -4, 10, -2, 14, 2, 14, 4, 10, 6, 0, 6, -12, 2, -22])
       .fill({ color: 0x231238, alpha: 0.98 })
       .stroke({ color: accent, width: 2, alpha: 0.85 })
+    createConnector([-3, -14, -13, -11, -24, -7, -11, -2], -3, -14, 0x493063, appendages)
+    createConnector([3, -14, 13, -11, 24, -7, 11, -2], 3, -14, 0x493063, appendages)
     const clawLeft = createClaw([-22, -12, -40, -18, -32, 0, -20, 8, -15, -6], 0x32204a)
     clawLeft.pivot.set(-22, -12)
     clawLeft.position.set(-22, -12)
@@ -172,16 +186,6 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
     clawRight.pivot.set(22, -12)
     clawRight.position.set(22, -12)
     appendages.addChild(clawRight)
-    connectors
-      .moveTo(-2, -10)
-      .lineTo(-8, -9)
-      .lineTo(-14, -8)
-      .stroke({ color: connectorColor, width: 6, alpha: 0.9, cap: 'round', join: 'round' })
-    connectors
-      .moveTo(2, -10)
-      .lineTo(8, -9)
-      .lineTo(14, -8)
-      .stroke({ color: connectorColor, width: 6, alpha: 0.9, cap: 'round', join: 'round' })
     const backLegLeft = createLeg([-4, 18, -12, 22, -18, 42, -8, 34], 0x36244f)
     backLegLeft.pivot.set(-4, 18)
     backLegLeft.position.set(-4, 18)
@@ -198,16 +202,8 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
     frontLegRight.pivot.set(1, 16)
     frontLegRight.position.set(1, 16)
     appendages.addChild(frontLegRight)
-    connectors
-      .moveTo(-2, 13)
-      .lineTo(-6, 20)
-      .lineTo(-8, 24)
-      .stroke({ color: connectorColor, width: 6, alpha: 0.9, cap: 'round', join: 'round' })
-    connectors
-      .moveTo(2, 13)
-      .lineTo(6, 20)
-      .lineTo(8, 24)
-      .stroke({ color: connectorColor, width: 6, alpha: 0.9, cap: 'round', join: 'round' })
+    const backConnectorLeft = createConnector([-2, 12, -8, 18, -12, 26, -4, 20], -2, 12, 0x36244f)
+    const backConnectorRight = createConnector([2, 12, 8, 18, 12, 26, 4, 20], 2, 12, 0x36244f)
     details
       .ellipse(0, -9, 3.6, 5.2)
       .fill({ color: 0x7a2cff, alpha: 0.98 })
@@ -221,6 +217,8 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
         { node: frontLegRight, phase: 0 },
         { node: frontLegLeft, phase: Math.PI },
         { node: backLegRight, phase: Math.PI },
+        { node: backConnectorLeft, phase: 0 },
+        { node: backConnectorRight, phase: Math.PI },
       ],
       claws: [
         { node: clawLeft, phase: 0 },

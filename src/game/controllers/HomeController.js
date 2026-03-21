@@ -653,10 +653,16 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
   descText.position.set(262, 186)
   panel.addChild(descText)
 
+  const actionButtonWidth = 220
+  const actionButtonSpacing = 20
+  const buttonRowWidth = actionButtonWidth * 2 + actionButtonSpacing
+  const buttonRowStartX = (panelWidth - buttonRowWidth) * 0.5
+  const buttonRowY = panelHeight - 84
+
   const actionButton = createModalButton({
-    x: 124,
-    y: panelHeight - 84,
-    width: 220,
+    x: buttonRowStartX,
+    y: buttonRowY,
+    width: actionButtonWidth,
     height: 52,
     label: '装备',
     onTap: () => {
@@ -677,9 +683,9 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
   panel.addChild(actionButton.container)
 
   const sellButton = createModalButton({
-    x: panelWidth - 344,
-    y: panelHeight - 84,
-    width: 220,
+    x: buttonRowStartX + actionButtonWidth + actionButtonSpacing,
+    y: buttonRowY,
+    width: actionButtonWidth,
     height: 52,
     label: '出售',
     variant: 'secondary',
