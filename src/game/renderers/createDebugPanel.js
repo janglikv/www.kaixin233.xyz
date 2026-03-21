@@ -1,7 +1,7 @@
 import * as PIXI from 'pixi.js'
 
 const PANEL_WIDTH = 190
-const PANEL_HEIGHT = 202
+const PANEL_HEIGHT = 236
 const ROW_START_Y = 42
 const ROW_GAP = 34
 const BUTTON_SIZE = 24
@@ -105,7 +105,15 @@ const createFlameButton = ({ x, y, onTap }) => {
   return button
 }
 
-export const createDebugPanel = ({ x, y, stats, onFlameSwitch, onChange, onCatalogToggle }) => {
+export const createDebugPanel = ({
+  x,
+  y,
+  state,
+  onAdjustStat,
+  onAdjustStageStartAt,
+  onFlameSwitch,
+  onCatalogToggle,
+}) => {
   const panel = new PIXI.Container()
   panel.position.set(x, y)
 
@@ -129,14 +137,20 @@ export const createDebugPanel = ({ x, y, stats, onFlameSwitch, onChange, onCatal
   title.position.set(14, 12)
   panel.addChild(title)
 
-  const valueTexts = []
-  const labels = ['攻击力', '攻速', '暴击']
+  const rows = [
+    { key: 'attackPower', label: 'ATK', formatValue: (value) => `${value}` },
+    { key: 'attackSpeed', label: 'SPD', formatValue: (value) => value.toFixed(1) },
+    { key: 'critChance', label: 'CRIT', formatValue: (value) => `${(value * 100).toFixed(0)}%` },
+    { key: 'debugStageStartAt', label: 'START', formatValue: (value) => value.toFixed(1) },
+  ]
 
-  labels.forEach((label, index) => {
+  const valueTexts = new Map()
+
+  rows.forEach((row, index) => {
     const rowY = ROW_START_Y + index * ROW_GAP
 
     const labelText = new PIXI.Text({
-      text: label,
+      text: row.label,
       style: {
         fill: 0xc7dbff,
         fontFamily: 'IBM Plex Mono, monospace',
@@ -146,13 +160,22 @@ export const createDebugPanel = ({ x, y, stats, onFlameSwitch, onChange, onCatal
     labelText.position.set(14, rowY + 4)
     panel.addChild(labelText)
 
-    const minusButton = createBoxButton({
-      x: 78,
-      y: rowY,
-      label: '-',
-      onTap: () => onChange(index, -1),
-    })
-    panel.addChild(minusButton)
+    const onTapAdjust = (direction) => {
+      if (row.key === 'debugStageStartAt') {
+        onAdjustStageStartAt?.(direction)
+        return
+      }
+      onAdjustStat?.(row.key, direction)
+    }
+
+    panel.addChild(
+      createBoxButton({
+        x: 78,
+        y: rowY,
+        label: '-',
+        onTap: () => onTapAdjust(-1),
+      }),
+    )
 
     const valueText = new PIXI.Text({
       text: '',
@@ -166,63 +189,66 @@ export const createDebugPanel = ({ x, y, stats, onFlameSwitch, onChange, onCatal
     valueText.anchor.set(1, 0)
     valueText.position.set(145, rowY + 4)
     panel.addChild(valueText)
-    valueTexts.push(valueText)
+    valueTexts.set(row.key, valueText)
 
-    const plusButton = createBoxButton({
-      x: 152,
-      y: rowY,
-      label: '+',
-      onTap: () => onChange(index, 1),
-    })
-    panel.addChild(plusButton)
+    panel.addChild(
+      createBoxButton({
+        x: 152,
+        y: rowY,
+        label: '+',
+        onTap: () => onTapAdjust(1),
+      }),
+    )
   })
 
   const flameLabel = new PIXI.Text({
-    text: '尾焰',
+    text: 'FX',
     style: {
       fill: 0xc7dbff,
       fontFamily: 'IBM Plex Mono, monospace',
       fontSize: 13,
     },
   })
-  flameLabel.position.set(14, 146)
+  flameLabel.position.set(14, 180)
   panel.addChild(flameLabel)
 
   panel.addChild(
     createFlameButton({
       x: PANEL_WIDTH - BUTTON_SIZE - 14,
-      y: 138,
+      y: 172,
       onTap: onFlameSwitch,
     }),
   )
 
   const catalogLabel = new PIXI.Text({
-    text: '资料库',
+    text: 'CAT',
     style: {
       fill: 0xc7dbff,
       fontFamily: 'IBM Plex Mono, monospace',
       fontSize: 13,
     },
   })
-  catalogLabel.position.set(14, 174)
+  catalogLabel.position.set(14, 208)
   panel.addChild(catalogLabel)
 
   panel.addChild(
     createBoxButton({
       x: PANEL_WIDTH - BUTTON_SIZE - 14,
-      y: 166,
-      label: '录',
+      y: 200,
+      label: 'O',
       onTap: onCatalogToggle,
     }),
   )
 
-  const update = (nextStats) => {
-    valueTexts[0].text = `${nextStats.attackPower}`
-    valueTexts[1].text = `${nextStats.attackSpeed.toFixed(1)}/s`
-    valueTexts[2].text = `${(nextStats.critChance * 100).toFixed(0)}%`
+  const update = (nextState) => {
+    rows.forEach((row) => {
+      const valueText = valueTexts.get(row.key)
+      if (!valueText) return
+      valueText.text = row.formatValue(nextState[row.key] ?? 0)
+    })
   }
 
-  update(stats)
+  update(state)
 
   return {
     container: panel,

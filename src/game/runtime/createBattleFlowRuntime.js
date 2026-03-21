@@ -44,7 +44,14 @@ export const createBattleFlowRuntime = ({
         gameOver,
       })
       const { x: playerX, y: playerY } = playerCombat.getPosition()
-      enemyFormation.update(deltaSeconds, { x: playerX, y: playerY }, ({ x, y, damage }) => {
+      enemyFormation.update(
+        deltaSeconds,
+        {
+          x: playerX,
+          y: playerY,
+          bounds: playerCombat.getTargetBounds(),
+        },
+        ({ x, y, damage }) => {
         audio.playExplosion({ large: true })
         spawnImpact(x, y, {
           force: true,
@@ -55,7 +62,8 @@ export const createBattleFlowRuntime = ({
         })
         if (gameOver) return
         playerCombat.applyIncomingDamage({ damage, x, y })
-      })
+        },
+      )
       impactEffectSystem.update(deltaSeconds)
       gameOverOverlay.setProgress(gameOverFadeProgress)
     },

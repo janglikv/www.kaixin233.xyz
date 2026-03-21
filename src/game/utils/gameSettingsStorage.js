@@ -15,6 +15,8 @@ const STORAGE_KEYS = {
   attackPower: `${STORAGE_KEY_PREFIX}:attackPower`,
   attackSpeed: `${STORAGE_KEY_PREFIX}:attackSpeed`,
   critChance: `${STORAGE_KEY_PREFIX}:critChance`,
+  playerMaxHealth: `${STORAGE_KEY_PREFIX}:playerMaxHealth`,
+  debugStageStartAt: `${STORAGE_KEY_PREFIX}:debugStageStartAt`,
   exhaustIndex: `${STORAGE_KEY_PREFIX}:exhaustIndex`,
   coinCount: `${STORAGE_KEY_PREFIX}:coinCount`,
   purchasedItemIds: `${STORAGE_KEY_PREFIX}:purchasedItemIds`,

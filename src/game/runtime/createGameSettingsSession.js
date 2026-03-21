@@ -1,5 +1,13 @@
 import { clearGameSettings, loadGameSettings, saveGameSettings } from '../utils/gameSettingsStorage'
-import { clampAttackPower, clampAttackSpeed, clampCritChance } from '../utils/playerStats'
+import {
+  clampAttackPower,
+  clampAttackSpeed,
+  clampCritChance,
+  clampPlayerMaxHealth,
+} from '../utils/playerStats'
+
+const clampDebugStageStartAt = (value) =>
+  Math.max(0, Math.round(Number.isFinite(value) ? value : 0))
 
 export const createGameSettingsNormalizer = ({
   shipDefaultItemId,
@@ -29,6 +37,8 @@ export const createGameSettingsNormalizer = ({
     attackPower: clampAttackPower(settings.attackPower),
     attackSpeed: clampAttackSpeed(settings.attackSpeed),
     critChance: clampCritChance(settings.critChance),
+    playerMaxHealth: clampPlayerMaxHealth(settings.playerMaxHealth),
+    debugStageStartAt: clampDebugStageStartAt(settings.debugStageStartAt),
     exhaustIndex: clampExhaustIndex(settings.exhaustIndex),
     coinCount: Number.isFinite(settings.coinCount) ? Math.max(0, Math.floor(settings.coinCount)) : 0,
   })
@@ -55,6 +65,8 @@ export const createGameSettingsSession = ({
         attackPower: state.attackPower,
         attackSpeed: state.attackSpeed,
         critChance: state.critChance,
+        playerMaxHealth: state.playerMaxHealth,
+        debugStageStartAt: state.debugStageStartAt,
         coinCount: state.coinCount,
       }
     },

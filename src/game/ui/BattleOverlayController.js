@@ -11,6 +11,15 @@ const FPS_TEXT_STYLE = {
   fontSize: 14,
   fontWeight: '700',
 }
+const DAMAGE_FLASH_DURATION = 0.26
+const DAMAGE_FLASH_BANDS = [
+  { width: 44, color: 0x5e0f12, alpha: 0.08 },
+  { width: 26, color: 0x8c171c, alpha: 0.14 },
+  { width: 12, color: 0xd13a3f, alpha: 0.2 },
+]
+const DAMAGE_FLASH_OUTLINE_WIDTH = 1
+const DAMAGE_FLASH_OUTLINE_COLOR = 0xff0000
+const DAMAGE_FLASH_OUTLINE_ALPHA = 0.5
 
 export class BattleOverlayController {
   constructor({
@@ -34,6 +43,9 @@ export class BattleOverlayController {
     onFpsToggle,
     onImpactEffectsToggle,
     onAdjustStat,
+    onAdjustDebugStageStartAt,
+    onSaveDebugStageStartAt,
+    onSavePlayerMaxHealth,
     onSaveAttackPower,
     onSaveAttackSpeed,
     onSaveCritChance,
@@ -48,6 +60,13 @@ export class BattleOverlayController {
     this.isCatalogOpen = initialCatalogVisible
     this.isSettingsOpen = false
     this.activePreviewCode = initialCatalogPreviewCode
+    this.width = width
+    this.height = height
+    this.damageFlashElapsed = DAMAGE_FLASH_DURATION
+    this.damageFlashOverlay = new PIXI.Graphics()
+    this.damageFlashOverlay.visible = false
+    this.damageFlashOverlay.eventMode = 'none'
+    this.damageFlashOverlay.blendMode = 'normal'
 
     this.statsPanel = createStatsPanel({
       x: width - 18,
@@ -115,6 +134,24 @@ export class BattleOverlayController {
       onAdjustStat: (key, direction) => {
         onAdjustStat?.(key, direction)
         this.refreshSettings()
+      },
+      onAdjustDebugStageStartAt: (direction) => {
+        onAdjustDebugStageStartAt?.(direction)
+        this.refreshSettings()
+      },
+      onSavePlayerMaxHealth: (value) => {
+        const result = onSavePlayerMaxHealth?.(value) ?? { ok: true }
+        if (result.ok !== false) {
+          this.refreshSettings()
+        }
+        return result
+      },
+      onSaveDebugStageStartAt: (value) => {
+        const result = onSaveDebugStageStartAt?.(value) ?? { ok: true }
+        if (result.ok !== false) {
+          this.refreshSettings()
+        }
+        return result
       },
       onSaveAttackPower: (value) => {
         const result = onSaveAttackPower?.(value) ?? { ok: true }
@@ -203,6 +240,7 @@ export class BattleOverlayController {
     gameLayer.addChild(this.statsPanel.container)
     gameLayer.addChild(this.catalogOverlay.container)
     gameLayer.addChild(this.settingsOverlay.container)
+    gameLayer.addChild(this.damageFlashOverlay)
   }
 
   getBounds() {
@@ -241,6 +279,11 @@ export class BattleOverlayController {
     this.playerHealthBar.update(current, max)
   }
 
+  triggerDamageFlash() {
+    this.damageFlashElapsed = 0
+    this.damageFlashOverlay.visible = true
+  }
+
   setCoinCount(count) {
     const nextCount = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0
     this.coinText.text = `金币 ${nextCount}`
@@ -248,6 +291,53 @@ export class BattleOverlayController {
 
   updatePreview(deltaSeconds) {
     this.catalogOverlay.update(deltaSeconds)
+    this.updateDamageFlash(deltaSeconds)
+  }
+
+  updateDamageFlash(deltaSeconds) {
+    if (this.damageFlashElapsed >= DAMAGE_FLASH_DURATION) {
+      if (this.damageFlashOverlay.visible) {
+        this.damageFlashOverlay.visible = false
+        this.damageFlashOverlay.clear()
+      }
+      return
+    }
+
+    this.damageFlashElapsed = Math.min(DAMAGE_FLASH_DURATION, this.damageFlashElapsed + deltaSeconds)
+    const progress = this.damageFlashElapsed / DAMAGE_FLASH_DURATION
+    const fade = 1 - progress
+    const easedFade = fade * fade
+    const width = this.width
+    const height = this.height
+
+    if (width <= 0 || height <= 0) return
+
+    this.damageFlashOverlay.visible = true
+    this.damageFlashOverlay.clear()
+
+    DAMAGE_FLASH_BANDS.forEach(({ width: bandWidth, color, alpha }) => {
+      const bandAlpha = alpha * easedFade
+      this.damageFlashOverlay
+        .rect(0, 0, width, bandWidth)
+        .fill({ color, alpha: bandAlpha })
+        .rect(0, height - bandWidth, width, bandWidth)
+        .fill({ color, alpha: bandAlpha })
+        .rect(0, 0, bandWidth, height)
+        .fill({ color, alpha: bandAlpha })
+        .rect(width - bandWidth, 0, bandWidth, height)
+        .fill({ color, alpha: bandAlpha })
+    })
+
+    const outlineAlpha = DAMAGE_FLASH_OUTLINE_ALPHA * easedFade
+    this.damageFlashOverlay
+      .rect(0, 0, width, DAMAGE_FLASH_OUTLINE_WIDTH)
+      .fill({ color: DAMAGE_FLASH_OUTLINE_COLOR, alpha: outlineAlpha })
+      .rect(0, height - DAMAGE_FLASH_OUTLINE_WIDTH, width, DAMAGE_FLASH_OUTLINE_WIDTH)
+      .fill({ color: DAMAGE_FLASH_OUTLINE_COLOR, alpha: outlineAlpha })
+      .rect(0, 0, DAMAGE_FLASH_OUTLINE_WIDTH, height)
+      .fill({ color: DAMAGE_FLASH_OUTLINE_COLOR, alpha: outlineAlpha })
+      .rect(width - DAMAGE_FLASH_OUTLINE_WIDTH, 0, DAMAGE_FLASH_OUTLINE_WIDTH, height)
+      .fill({ color: DAMAGE_FLASH_OUTLINE_COLOR, alpha: outlineAlpha })
   }
 
   refreshSettings() {
@@ -269,6 +359,7 @@ export class BattleOverlayController {
       this.catalogOverlay.hide()
     }
     this.settingsOverlay.update(settingsState)
+    this.statsPanel.update(settingsState)
     if (typeof settingsState.coinCount === 'number') {
       this.setCoinCount(settingsState.coinCount)
     }
@@ -296,12 +387,12 @@ export class BattleOverlayController {
       logicalX <= settingsBounds.right &&
       logicalY >= settingsBounds.top &&
       logicalY <= settingsBounds.bottom
-
     return insideCatalog || insideSettingsButton || insideSettings
   }
 
   destroy() {
     this.settingsOverlay.destroy?.()
+    this.damageFlashOverlay.destroy()
     this.settingsButton.container.destroy({ children: true })
     this.playerHealthBar.container.destroy({ children: true })
     this.statsPanel.container.destroy({ children: true })

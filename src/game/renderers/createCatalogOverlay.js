@@ -154,9 +154,6 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       return claw
     }
 
-    shadow
-      .ellipse(0, 28, 30, 9)
-      .fill(0x02050d)
     glow.blendMode = 'add'
     glow
       .ellipse(0, 0, 14, 22)
@@ -231,9 +228,6 @@ export const createVoidCreaturePreview = (entry, options = {}) => {
       ],
     }
   } else if (entry.silhouette === 'hollow-pilgrim') {
-    shadow
-      .ellipse(0, 28, 30, 10)
-      .fill(0x02050d)
     glow.blendMode = 'add'
     glow
       .ellipse(0, -2, 26, 42)

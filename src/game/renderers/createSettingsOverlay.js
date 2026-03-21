@@ -378,16 +378,21 @@ const createStepperActionRow = ({
   onStep,
   actionLabel,
   onAction,
+  valueWidth = 412,
+  minusX = 428,
+  plusX = 480,
+  actionX = 532,
+  actionWidth = ACTION_BUTTON_WIDTH,
 }) => {
   const container = new PIXI.Container()
-  const valueText = createValueText({ x: 0, y: 17, width: 412 })
+  const valueText = createValueText({ x: 0, y: 17, width: valueWidth })
 
   container.position.set(x, y)
   container.addChild(createLabel({ x: 0, y: 2, text: label }))
   container.addChild(valueText)
   container.addChild(
     createControlButton({
-      x: 428,
+      x: minusX,
       y: 1,
       width: CONTROL_BUTTON_WIDTH,
       height: CONTROL_BUTTON_HEIGHT,
@@ -397,7 +402,7 @@ const createStepperActionRow = ({
   )
   container.addChild(
     createControlButton({
-      x: 480,
+      x: plusX,
       y: 1,
       width: CONTROL_BUTTON_WIDTH,
       height: CONTROL_BUTTON_HEIGHT,
@@ -407,9 +412,9 @@ const createStepperActionRow = ({
   )
   container.addChild(
     createControlButton({
-      x: 532,
+      x: actionX,
       y: 0,
-      width: ACTION_BUTTON_WIDTH,
+      width: actionWidth,
       height: ACTION_BUTTON_HEIGHT,
       label: actionLabel,
       onTap: onAction,
@@ -425,16 +430,26 @@ const createStepperActionRow = ({
   }
 }
 
-const createActionRow = ({ x, y, label, buttonLabel, value = '', onTap, variant = 'default' }) => {
+const createActionRow = ({
+  x,
+  y,
+  label,
+  buttonLabel,
+  value = '',
+  onTap,
+  variant = 'default',
+  valueWidth = 412,
+  buttonX = 428,
+}) => {
   const container = new PIXI.Container()
-  const valueText = createValueText({ x: 0, y: 17, width: 412 })
+  const valueText = createValueText({ x: 0, y: 17, width: valueWidth })
 
   container.position.set(x, y)
   container.addChild(createLabel({ x: 0, y: 2, text: label }))
   container.addChild(valueText)
   container.addChild(
     createControlButton({
-      x: 428,
+      x: buttonX,
       y: 0,
       width: ACTION_BUTTON_WIDTH,
       height: ACTION_BUTTON_HEIGHT,
@@ -573,6 +588,9 @@ export const createSettingsOverlay = ({
   onFpsToggle,
   onImpactEffectsToggle,
   onAdjustStat,
+  onSavePlayerMaxHealth,
+  onAdjustDebugStageStartAt,
+  onSaveDebugStageStartAt,
   onSaveAttackPower,
   onSaveAttackSpeed,
   onSaveCritChance,
@@ -612,11 +630,16 @@ export const createSettingsOverlay = ({
 
   const basicTabContainer = new PIXI.Container()
   const debugTabContainer = new PIXI.Container()
+  const debugPageOneContainer = new PIXI.Container()
+  const debugPageTwoContainer = new PIXI.Container()
   let activeTab = 'basic'
+  let activeDebugPage = 0
   let currentAttackPower = state.attackPower
   let currentAttackSpeed = state.attackSpeed
   let currentCritChance = state.critChance
+  let currentPlayerMaxHealth = state.playerMaxHealth ?? 10
   let currentCoinCount = state.coinCount ?? 0
+  let currentDebugStageStartAt = state.debugStageStartAt ?? 0
 
   const basicTab = createTabButton({
     x: PANEL_PADDING,
@@ -629,6 +652,7 @@ export const createSettingsOverlay = ({
       debugTab.setActive(false)
       basicTabContainer.visible = true
       debugTabContainer.visible = false
+      syncDebugPages()
     },
   })
   const debugTab = createTabButton({
@@ -638,10 +662,12 @@ export const createSettingsOverlay = ({
     active: false,
     onTap: () => {
       activeTab = 'debug'
+      activeDebugPage = 0
       basicTab.setActive(false)
       debugTab.setActive(true)
       basicTabContainer.visible = false
       debugTabContainer.visible = true
+      syncDebugPages()
     },
   })
   container.addChild(basicTab.container)
@@ -663,7 +689,7 @@ export const createSettingsOverlay = ({
   })
   const impactEffectsRow = createToggleRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 4,
+    y: ROW_START_Y + ROW_GAP * 5,
     label: '爆炸效果',
     value: state.impactEffectsEnabled,
     onToggle: onImpactEffectsToggle,
@@ -685,7 +711,7 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP,
     label: '攻速',
     value: state.attackSpeed,
-    formatValue: (nextValue) => `${nextValue.toFixed(1)}/s`,
+    formatValue: (nextValue) => nextValue.toFixed(1),
     onStep: (direction) => onAdjustStat('attackSpeed', direction),
     actionLabel: '编辑',
     onAction: () => {
@@ -704,9 +730,21 @@ export const createSettingsOverlay = ({
       critChanceModal.open(String(Math.round(currentCritChance * 100)))
     },
   })
-  const coinCountRow = createStepperActionRow({
+  const playerMaxHealthRow = createStepperActionRow({
     x: PANEL_PADDING,
     y: ROW_START_Y + ROW_GAP * 3,
+    label: '生命值',
+    value: currentPlayerMaxHealth,
+    formatValue: (nextValue) => `${Math.max(1, Math.round(nextValue ?? 10))}`,
+    onStep: (direction) => onAdjustStat('playerMaxHealth', direction),
+    actionLabel: '编辑',
+    onAction: () => {
+      playerMaxHealthModal.open(String(currentPlayerMaxHealth))
+    },
+  })
+  const coinCountRow = createStepperActionRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y + ROW_GAP * 4,
     label: '金币',
     value: Math.max(0, Math.floor(state.coinCount ?? 0)),
     formatValue: (nextValue) => `${Math.max(0, Math.floor(nextValue ?? 0))}`,
@@ -716,9 +754,21 @@ export const createSettingsOverlay = ({
       coinCountModal.open(String(currentCoinCount))
     },
   })
+  const debugStageStartAtRow = createStepperActionRow({
+    x: PANEL_PADDING,
+    y: ROW_START_Y,
+    label: '起始进度',
+    value: currentDebugStageStartAt,
+    formatValue: (nextValue) => `${Number.isFinite(nextValue) ? Math.max(0, Math.round(nextValue)) : 0}`,
+    onStep: onAdjustDebugStageStartAt,
+    actionLabel: '编辑',
+    onAction: () => {
+      debugStageStartAtModal.open(String(currentDebugStageStartAt))
+    },
+  })
   const catalogRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 5,
+    y: ROW_START_Y + ROW_GAP,
     label: '资料库',
     buttonLabel: '打开',
     value: '查看飞船资料',
@@ -726,7 +776,7 @@ export const createSettingsOverlay = ({
   })
   const clearDataRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 6,
+    y: ROW_START_Y + ROW_GAP * 2,
     label: '清空数据',
     buttonLabel: '执行',
     value: '重置本地存档',
@@ -734,7 +784,7 @@ export const createSettingsOverlay = ({
   })
   const pressureTestSceneRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 7,
+    y: ROW_START_Y + ROW_GAP * 3,
     label: '压测场景',
     buttonLabel: '进入',
     value: '直接进入压测场景',
@@ -742,7 +792,7 @@ export const createSettingsOverlay = ({
   })
   const fixedTargetSceneRow = createActionRow({
     x: PANEL_PADDING,
-    y: ROW_START_Y + ROW_GAP * 8,
+    y: ROW_START_Y + ROW_GAP * 4,
     label: '固定靶场',
     buttonLabel: '进入',
     value: '20个固定敌人，单排',
@@ -757,9 +807,40 @@ export const createSettingsOverlay = ({
     onTap: onLeave,
     variant: 'success',
   })
+  const syncDebugPages = () => {
+    debugPageOneContainer.visible = activeTab === 'debug' && activeDebugPage === 0
+    debugPageTwoContainer.visible = activeTab === 'debug' && activeDebugPage === 1
+    prevDebugPageButton.visible = activeTab === 'debug' && activeDebugPage === 1
+    nextDebugPageButton.visible = activeTab === 'debug' && activeDebugPage === 0
+  }
+  const prevDebugPageButton = createControlButton({
+    x: PANEL_PADDING,
+    y: height - PANEL_PADDING - LARGE_ACTION_HEIGHT,
+    width: 120,
+    height: LARGE_ACTION_HEIGHT,
+    label: '上一页',
+    onTap: () => {
+      activeDebugPage = 0
+      syncDebugPages()
+    },
+  })
+  const nextDebugPageButton = createControlButton({
+    x: width - PANEL_PADDING - 120,
+    y: height - PANEL_PADDING - LARGE_ACTION_HEIGHT,
+    width: 120,
+    height: LARGE_ACTION_HEIGHT,
+    label: '下一页',
+    onTap: () => {
+      activeDebugPage = 1
+      syncDebugPages()
+    },
+  })
+  prevDebugPageButton.children[1].text = '\u4e0a\u4e00\u9875'
+  nextDebugPageButton.children[1].text = '\u4e0b\u4e00\u9875'
   attackPowerRow.update(state.attackPower)
   attackSpeedRow.update(state.attackSpeed)
   critChanceRow.update(state.critChance)
+  debugStageStartAtRow.update(currentDebugStageStartAt)
   catalogRow.update('查看飞船资料')
 
   const attackPowerModal = createNumericEditModal({
@@ -805,6 +886,26 @@ export const createSettingsOverlay = ({
     onConfirm: (value) => onSaveCoinCount?.(value) ?? { ok: true },
     getDomRect,
   })
+  const debugStageStartAtModal = createNumericEditModal({
+    width,
+    height,
+    titleText: '设置起始进度',
+    hintText: '输入非负整数，刷新后会从该进度开始',
+    placeholderText: '例如 10',
+    initialValue: String(currentDebugStageStartAt),
+    onConfirm: (value) => onSaveDebugStageStartAt?.(value) ?? { ok: true },
+    getDomRect,
+  })
+  const playerMaxHealthModal = createNumericEditModal({
+    width,
+    height,
+    titleText: '设置生命值',
+    hintText: '输入至少为 1 的整数，保存后会重置当前血量',
+    placeholderText: '例如 10',
+    initialValue: String(currentPlayerMaxHealth),
+    onConfirm: (value) => onSavePlayerMaxHealth?.(value) ?? { ok: true },
+    getDomRect,
+  })
 
   ;[
     musicRow.container,
@@ -817,15 +918,26 @@ export const createSettingsOverlay = ({
     attackPowerRow.container,
     attackSpeedRow.container,
     critChanceRow.container,
+    playerMaxHealthRow.container,
     coinCountRow.container,
+  ].forEach((child) => {
+    debugPageOneContainer.addChild(child)
+  })
+  ;[
+    debugStageStartAtRow.container,
     impactEffectsRow.container,
     catalogRow.container,
     clearDataRow.container,
     pressureTestSceneRow.container,
     fixedTargetSceneRow.container,
   ].forEach((child) => {
-    debugTabContainer.addChild(child)
+    debugPageTwoContainer.addChild(child)
   })
+  debugTabContainer.addChild(debugPageOneContainer)
+  debugTabContainer.addChild(debugPageTwoContainer)
+  debugTabContainer.addChild(prevDebugPageButton)
+  debugTabContainer.addChild(nextDebugPageButton)
+  syncDebugPages()
   debugTabContainer.visible = false
   container.addChild(basicTabContainer)
   container.addChild(debugTabContainer)
@@ -836,6 +948,8 @@ export const createSettingsOverlay = ({
   container.addChild(attackSpeedModal.container)
   container.addChild(critChanceModal.container)
   container.addChild(coinCountModal.container)
+  container.addChild(debugStageStartAtModal.container)
+  container.addChild(playerMaxHealthModal.container)
 
   return {
     container,
@@ -854,6 +968,8 @@ export const createSettingsOverlay = ({
       attackSpeedModal.close()
       critChanceModal.close()
       coinCountModal.close()
+      debugStageStartAtModal.close()
+      playerMaxHealthModal.close()
     },
     isVisible() {
       return container.visible
@@ -862,22 +978,29 @@ export const createSettingsOverlay = ({
       currentAttackPower = nextState.attackPower
       currentAttackSpeed = nextState.attackSpeed
       currentCritChance = nextState.critChance
+      currentPlayerMaxHealth = nextState.playerMaxHealth ?? 10
       currentCoinCount = Math.max(0, Math.floor(nextState.coinCount ?? 0))
+      currentDebugStageStartAt = nextState.debugStageStartAt ?? 0
       musicRow.update(nextState.musicEnabled)
       fpsRow.update(nextState.fpsEnabled)
       impactEffectsRow.update(nextState.impactEffectsEnabled)
       attackPowerRow.update(nextState.attackPower)
       attackSpeedRow.update(nextState.attackSpeed)
       critChanceRow.update(nextState.critChance)
+      playerMaxHealthRow.update(currentPlayerMaxHealth)
       coinCountRow.update(currentCoinCount)
+      debugStageStartAtRow.update(currentDebugStageStartAt)
       basicTabContainer.visible = activeTab === 'basic'
       debugTabContainer.visible = activeTab === 'debug'
+      syncDebugPages()
     },
     destroy() {
       attackPowerModal.destroy()
       attackSpeedModal.destroy()
       critChanceModal.destroy()
       coinCountModal.destroy()
+      debugStageStartAtModal.destroy()
+      playerMaxHealthModal.destroy()
     },
   }
 }

@@ -7,6 +7,8 @@ export const WORLD_INSET = 0
 export const WORLD_RADIUS = 0
 export const PLAYER_MAX_HEALTH = 10
 export const GAME_OVER_FADE_TIME = 1.2
+export const GAME_SPEED_MULTIPLIER = 1.4
+export const DEBUG_STAGE_START_AT_DEFAULT = 0
 export const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
 export const EXHAUST_DEFAULT_ITEM_ID = 'exhaust-0'
 export const HOMING_BURST_ITEM_ID = 'tactical-quick-wit'
@@ -27,6 +29,8 @@ export const createGameSettingsDefaults = ({ pressureTestEnabled = false, debugS
   attackPower: PLAYER_STATS.attackPower,
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
+  playerMaxHealth: PLAYER_STATS.playerMaxHealth,
+  debugStageStartAt: DEBUG_STAGE_START_AT_DEFAULT,
   exhaustIndex: 0,
   coinCount: 0,
 })

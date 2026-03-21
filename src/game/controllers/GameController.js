@@ -1,13 +1,14 @@
 import * as PIXI from 'pixi.js'
 import { createSynthAudio } from '../audio/createSynthAudio'
 import { CATALOG_ENTRIES } from '../data/catalogEntries'
-import { RiftServitorSwarm } from '../enemies/RiftServitorSwarm'
+import { createDefaultStageEnemyFormation } from '../enemies/createDefaultStageEnemyFormation'
 import { createImpactEffectSystem } from '../effects/createImpactEffectSystem'
 import { createBattleFlowRuntime } from '../runtime/createBattleFlowRuntime'
 import {
   createGameSettingsDefaults,
   EXHAUST_DEFAULT_ITEM_ID,
   GAME_OVER_FADE_TIME,
+  GAME_SPEED_MULTIPLIER,
   getExhaustIndexByItemId,
   getShipThemeByItemId,
   HOMING_BURST_ITEM_ID,
@@ -31,9 +32,6 @@ import { GameOverOverlayController } from '../ui/GameOverOverlayController'
 import { createKeyboardController } from '../utils/createKeyboardController'
 import { createPointerController } from '../utils/createPointerController'
 
-const NORMAL_ENEMY_SPAWN_X = LOGICAL_WIDTH * 0.5
-const NORMAL_ENEMY_SPAWN_Y = -92
-
 const createEmptyEnemyFormation = () => ({
   getHitboxes() {
     return []
@@ -48,17 +46,7 @@ const createEmptyEnemyFormation = () => ({
   destroy() {},
 })
 
-const createDefaultEnemyFormation = ({ parent, onEnemyDeath }) =>
-  new RiftServitorSwarm({
-    parent,
-    columns: 4,
-    rows: 3,
-    spawnX: NORMAL_ENEMY_SPAWN_X,
-    spawnY: NORMAL_ENEMY_SPAWN_Y,
-    spawnInterval: 1.08,
-    worldHeight: LOGICAL_HEIGHT,
-    onEnemyDeath,
-  })
+const createDefaultEnemyFormation = (options) => createDefaultStageEnemyFormation(options)
 
 export class GameController {
   constructor(container, options = {}) {
@@ -136,9 +124,10 @@ export class GameController {
       worldRadius: WORLD_RADIUS,
     })
     const { gameLayer, worldLayer, gameOverLayer } = sceneRuntime
+    const initialPlayerMaxHealth = persistedSettings.playerMaxHealth ?? PLAYER_MAX_HEALTH
     const playerHealth = {
-      current: PLAYER_MAX_HEALTH,
-      max: PLAYER_MAX_HEALTH,
+      current: initialPlayerMaxHealth,
+      max: initialPlayerMaxHealth,
     }
     const playerCoins = {
       current: persistedSettings.coinCount ?? 0,
@@ -165,6 +154,7 @@ export class GameController {
           renderer: app.renderer,
           width: LOGICAL_WIDTH,
           height: LOGICAL_HEIGHT,
+          initialElapsedSeconds: persistedSettings.debugStageStartAt,
           onEnemyDeath: ({ x, y }) => {
             playerCombat?.spawnCoinDrop?.(x, y)
           },
@@ -199,8 +189,13 @@ export class GameController {
       spawnImpact,
       getEnemyFormation: () => enemyFormation,
       onHealthChange: (currentHealth, maxHealth) => {
+        const previousHealth = playerHealth.current
         playerHealth.current = currentHealth
+        playerHealth.max = maxHealth
         overlayController?.updateHealth(currentHealth, maxHealth)
+        if (currentHealth < previousHealth) {
+          overlayController?.triggerDamageFlash()
+        }
       },
       onCoinCountChange: (currentCoins) => {
         playerCoins.current = currentCoins
@@ -222,6 +217,7 @@ export class GameController {
       playerStats,
       playerCombat,
       initialExhaustIndex: initialEquippedExhaustIndex,
+      clampExhaustIndex,
       onImpactEffectsChange: (enabled) => {
         isImpactEffectsEnabled = enabled
       },
@@ -282,6 +278,7 @@ export class GameController {
 
     const tick = (ticker) => {
       const rawDeltaSeconds = ticker.deltaMS / 1000
+      const scaledDeltaSeconds = rawDeltaSeconds * GAME_SPEED_MULTIPLIER
       fpsSampleElapsed += rawDeltaSeconds
       fpsFrameCount += 1
       if (fpsSampleElapsed >= 0.2) {
@@ -291,7 +288,7 @@ export class GameController {
       }
       overlayController.updatePreview(rawDeltaSeconds)
       if (overlayController.isPaused()) return
-      battleFlow.update(rawDeltaSeconds)
+      battleFlow.update(scaledDeltaSeconds)
     }
 
     app.renderer.on('resize', sceneRuntime.layout)

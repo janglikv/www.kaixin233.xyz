@@ -18,9 +18,11 @@ import {
   clampAttackPower,
   clampAttackSpeed,
   clampCritChance,
+  clampPlayerMaxHealth,
   parseAttackPowerInput,
   parseAttackSpeedInput,
   parseCritChanceInput,
+  parsePlayerMaxHealthInput,
 } from '../utils/playerStats'
 
 const SHIP_DEFAULT_ITEM_ID = 'ship-frame-0'
@@ -55,6 +57,7 @@ const GAME_SETTINGS_DEFAULTS = {
   attackPower: PLAYER_STATS.attackPower,
   attackSpeed: PLAYER_STATS.attackSpeed,
   critChance: PLAYER_STATS.critChance,
+  playerMaxHealth: PLAYER_STATS.playerMaxHealth,
   coinCount: 0,
   purchasedItemIds: [],
 }
@@ -102,6 +105,7 @@ const normalizeGameSettings = (settings) => {
     attackPower: clampAttackPower(settings.attackPower),
     attackSpeed: clampAttackSpeed(settings.attackSpeed),
     critChance: clampCritChance(settings.critChance),
+    playerMaxHealth: clampPlayerMaxHealth(settings.playerMaxHealth),
     coinCount: Number.isFinite(settings.coinCount) ? Math.max(0, Math.floor(settings.coinCount)) : 0,
     purchasedItemIds,
   }
@@ -1199,6 +1203,7 @@ export class HomeController {
     let attackPower = persistedSettings.attackPower ?? PLAYER_STATS.attackPower
     let attackSpeed = persistedSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
     let critChance = persistedSettings.critChance ?? PLAYER_STATS.critChance
+    let playerMaxHealth = persistedSettings.playerMaxHealth ?? PLAYER_STATS.playerMaxHealth
     let coinCount = persistedSettings.coinCount ?? 0
     let purchasedItemIds = persistedSettings.purchasedItemIds ?? []
 
@@ -1218,6 +1223,7 @@ export class HomeController {
       attackPower = nextSettings.attackPower ?? PLAYER_STATS.attackPower
       attackSpeed = nextSettings.attackSpeed ?? PLAYER_STATS.attackSpeed
       critChance = nextSettings.critChance ?? PLAYER_STATS.critChance
+      playerMaxHealth = nextSettings.playerMaxHealth ?? PLAYER_STATS.playerMaxHealth
       coinCount = nextSettings.coinCount ?? 0
       purchasedItemIds = nextSettings.purchasedItemIds ?? []
     }
@@ -1239,6 +1245,7 @@ export class HomeController {
           attackPower,
           attackSpeed,
           critChance,
+          playerMaxHealth,
           coinCount,
           purchasedItemIds,
           ...overrides,
@@ -1296,6 +1303,7 @@ export class HomeController {
       attackPower,
       attackSpeed,
       critChance,
+      playerMaxHealth,
       coinCount,
     })
     const settingsOverlay = createSettingsOverlay({
@@ -1337,6 +1345,9 @@ export class HomeController {
         if (key === 'critChance') {
           critChance = Math.max(0, Math.min(1, Math.round((critChance + direction * 0.05) * 100) / 100))
         }
+        if (key === 'playerMaxHealth') {
+          playerMaxHealth = clampPlayerMaxHealth(playerMaxHealth + direction)
+        }
         if (key === 'coinCount') {
           coinCount = Math.max(0, Math.floor(coinCount + direction))
           inventoryPanel.setCoinCount(coinCount)
@@ -1354,6 +1365,21 @@ export class HomeController {
         }
 
         attackPower = nextAttackPower
+        persistSettings()
+        settingsOverlay.update(getSettingsOverlayState())
+
+        return { ok: true }
+      },
+      onSavePlayerMaxHealth: (value) => {
+        const nextPlayerMaxHealth = parsePlayerMaxHealthInput(value)
+        if (nextPlayerMaxHealth == null) {
+          return {
+            ok: false,
+            error: '请输入有效的生命值数值',
+          }
+        }
+
+        playerMaxHealth = nextPlayerMaxHealth
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
 

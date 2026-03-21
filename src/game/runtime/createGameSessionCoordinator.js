@@ -8,6 +8,7 @@ export const createGameSessionCoordinator = ({
   playerStats,
   playerCombat,
   initialExhaustIndex,
+  clampExhaustIndex,
   onImpactEffectsChange,
   onOverlayStatsChange,
 }) => {
@@ -38,6 +39,14 @@ export const createGameSessionCoordinator = ({
       normalizeGameSettings({
         critChance: value + direction * 0.05,
       }).critChance,
+    playerMaxHealth: (value, direction) =>
+      normalizeGameSettings({
+        playerMaxHealth: value + direction,
+      }).playerMaxHealth,
+    debugStageStartAt: (value, direction) =>
+      normalizeGameSettings({
+        debugStageStartAt: value + direction,
+      }).debugStageStartAt,
   }
 
   const persistSettings = (patch = {}) =>
@@ -48,6 +57,8 @@ export const createGameSessionCoordinator = ({
       attackPower: playerStats.attackPower,
       attackSpeed: playerStats.attackSpeed,
       critChance: playerStats.critChance,
+      playerMaxHealth: settingsSession.getState().playerMaxHealth,
+      debugStageStartAt: settingsSession.getState().debugStageStartAt,
       equippedTacticalItemId: settingsSession.getState().equippedTacticalItemId,
       equippedExhaustItemId: `exhaust-${currentExhaustIndex}`,
       ...patch,
@@ -132,9 +143,80 @@ export const createGameSessionCoordinator = ({
           const adjustStat = statAdjusters[key]
           if (!adjustStat) return
           audio.playUiClick({ high: direction > 0 })
+          if (key === 'playerMaxHealth') {
+            const nextHealth = adjustStat(settingsSession.getState().playerMaxHealth, direction)
+            playerCombat.setHealth(nextHealth)
+            persistSettings({
+              playerMaxHealth: nextHealth,
+            })
+            overlayController?.refreshSettings()
+            return
+          }
           playerStats[key] = adjustStat(playerStats[key], direction)
           syncPlayerCombat()
           onOverlayStatsChange?.(playerStats)
+          persistSettings()
+        },
+        onAdjustDebugStageStartAt: (direction) => {
+          audio.playUiClick({ high: direction > 0 })
+          const currentValue = settingsSession.getState().debugStageStartAt
+          const nextValue = statAdjusters.debugStageStartAt(currentValue, direction)
+          settingsSession.persist({
+            debugStageStartAt: nextValue,
+          })
+          overlayController?.refreshSettings()
+        },
+        onSaveDebugStageStartAt: (value) => {
+          const nextDebugStageStartAt = Number(value)
+          if (!Number.isFinite(nextDebugStageStartAt) || nextDebugStageStartAt < 0) {
+            return {
+              ok: false,
+              error: '请输入有效的非负起始进度',
+            }
+          }
+
+          const normalizedValue = normalizeGameSettings({
+            debugStageStartAt: nextDebugStageStartAt,
+          }).debugStageStartAt
+          audio.playUiClick({
+            high: normalizedValue >= settingsSession.getState().debugStageStartAt,
+          })
+          settingsSession.persist({
+            debugStageStartAt: normalizedValue,
+          })
+          overlayController?.refreshSettings()
+
+          return { ok: true }
+        },
+        onSavePlayerMaxHealth: (value) => {
+          const nextPlayerMaxHealth = Number(value)
+          if (!Number.isFinite(nextPlayerMaxHealth) || nextPlayerMaxHealth < 1) {
+            return {
+              ok: false,
+              error: '请输入有效的生命值',
+            }
+          }
+
+          const normalizedValue = normalizeGameSettings({
+            playerMaxHealth: nextPlayerMaxHealth,
+          }).playerMaxHealth
+          audio.playUiClick({
+            high: normalizedValue >= settingsSession.getState().playerMaxHealth,
+          })
+          playerCombat.setHealth(normalizedValue)
+          persistSettings({
+            playerMaxHealth: normalizedValue,
+          })
+          overlayController?.refreshSettings()
+
+          return { ok: true }
+        },
+        onCycleExhaust: () => {
+          const nextExhaustIndex = clampExhaustIndex(currentExhaustIndex + 1)
+          currentExhaustIndex =
+            nextExhaustIndex === currentExhaustIndex ? clampExhaustIndex(0) : nextExhaustIndex
+          playerCombat.setExhaustIndex(currentExhaustIndex)
+          audio.playUiClick({ high: true })
           persistSettings()
         },
         onSaveAttackPower: (value) => {

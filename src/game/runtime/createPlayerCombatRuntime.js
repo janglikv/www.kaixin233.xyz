@@ -382,6 +382,12 @@ export const createPlayerCombatRuntime = ({
     setExhaustIndex(nextIndex) {
       exhaustSwitcher.setIndex(nextIndex)
     },
+    setHealth(nextMaxHealth) {
+      const normalizedHealth = Number.isFinite(nextMaxHealth) ? Math.max(1, Math.round(nextMaxHealth)) : 1
+      health.max = normalizedHealth
+      health.current = normalizedHealth
+      onHealthChange?.(health.current, health.max)
+    },
     syncSettings({ attackPower, attackSpeed, critChance, exhaustIndex, hasHomingBurst }) {
       stats.attackPower = attackPower
       stats.attackSpeed = attackSpeed

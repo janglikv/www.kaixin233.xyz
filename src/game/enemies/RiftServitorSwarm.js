@@ -3,16 +3,15 @@ import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { createVoidCreaturePreview } from '../renderers/createCatalogOverlay'
 
 const ENEMY_ENTRY_CODE = '#10'
+const TRACKING_ENEMY_ACCENT = 0xff4d6d
 const ENEMY_SCALE = 0.96
 const ENEMY_HEALTH = 1
 const ENEMY_COLLISION_RADIUS = 38
-const ENEMY_SPEED = 112
-const ENEMY_COMMIT_SPEED = 228
+const ENEMY_SPEED = 224
+const ENEMY_COMMIT_SPEED = 456
 const ENEMY_CONTACT_DAMAGE = 3
 const ENEMY_TRACK_DISTANCE = 600
 const ENEMY_COMMIT_DISTANCE = 220
-const ENEMY_EXPLODE_DISTANCE = 96
-const ENEMY_COMMIT_MAX_DURATION = 1
 const ENEMY_RECYCLE_BUFFER = 120
 const ENEMY_SPATIAL_CELL_SIZE = 80
 const ENEMY_SEPARATION_WEIGHT = 0.9
@@ -63,6 +62,12 @@ export class RiftServitorSwarm {
     spawnX,
     spawnY = -92,
     spawnInterval = 1.08,
+    flightPath = null,
+    trackPlayer = true,
+    trackDistance = ENEMY_TRACK_DISTANCE,
+    commitDistance = ENEMY_COMMIT_DISTANCE,
+    commitSpeedMultiplier = 1,
+    worldWidth = 1280,
     worldHeight = 720,
     onEnemyDeath = null,
   }) {
@@ -72,6 +77,14 @@ export class RiftServitorSwarm {
     this.spawnX = spawnX
     this.spawnY = spawnY
     this.spawnInterval = spawnInterval
+    this.flightPath = Array.isArray(flightPath) ? flightPath.filter(Boolean) : []
+    this.trackPlayer = trackPlayer
+    this.trackDistance = trackDistance
+    this.commitDistance = commitDistance
+    this.commitSpeedMultiplier = commitSpeedMultiplier
+    this.leftLimit = -ENEMY_RECYCLE_BUFFER
+    this.rightLimit = worldWidth + ENEMY_RECYCLE_BUFFER
+    this.topLimit = -ENEMY_RECYCLE_BUFFER
     this.bottomLimit = worldHeight + ENEMY_RECYCLE_BUFFER
     this.onEnemyDeath = typeof onEnemyDeath === 'function' ? onEnemyDeath : null
     this.elapsedSeconds = 0
@@ -79,8 +92,14 @@ export class RiftServitorSwarm {
     this.enemies = []
     this.nextId = 1
 
-    const entry = CATALOG_ENTRIES.find((item) => item.code === ENEMY_ENTRY_CODE)
-    if (!entry) return
+    const baseEntry = CATALOG_ENTRIES.find((item) => item.code === ENEMY_ENTRY_CODE)
+    if (!baseEntry) return
+    const entry = this.trackPlayer
+      ? {
+          ...baseEntry,
+          accent: TRACKING_ENEMY_ACCENT,
+        }
+      : baseEntry
 
     for (let rowIndex = 0; rowIndex < rows; rowIndex += 1) {
       for (let columnIndex = 0; columnIndex < columns; columnIndex += 1) {
@@ -100,13 +119,13 @@ export class RiftServitorSwarm {
           health: ENEMY_HEALTH,
           active: false,
           commit: false,
-          commitElapsed: 0,
           seekDirectionX: 0,
           seekDirectionY: 1,
           moveDirectionX: 0,
           moveDirectionY: 1,
           commitDirectionX: 0,
           commitDirectionY: 1,
+          pathIndex: 0,
           spawnTime: spawnOrder * spawnInterval,
           collisionRadius: ENEMY_COLLISION_RADIUS,
           hitboxHalfWidth: 24,
@@ -195,15 +214,15 @@ export class RiftServitorSwarm {
     })
 
     activeEnemies.forEach((enemy) => {
-      const rawTargetX = seekTarget?.x ?? this.spawnX
-      const rawTargetY = seekTarget?.y ?? this.bottomLimit
-      const toTargetX = rawTargetX - enemy.x
-      const toTargetY = rawTargetY - enemy.y
-      let deltaX = toTargetX
-      let deltaY = toTargetY
-      const targetDistance = Math.hypot(toTargetX, toTargetY)
+      const playerDeltaX = (seekTarget?.x ?? enemy.x) - enemy.x
+      const playerDeltaY = (seekTarget?.y ?? enemy.y) - enemy.y
+      const playerDistance = seekTarget ? Math.hypot(playerDeltaX, playerDeltaY) : Infinity
+      let deltaX = 0
+      let deltaY = 1
       const trackingTarget =
-        seekTarget && targetDistance <= ENEMY_TRACK_DISTANCE ? seekTarget : null
+        this.trackPlayer && seekTarget && playerDistance <= this.trackDistance
+          ? seekTarget
+          : null
       const cellX = Math.floor(enemy.x / ENEMY_SPATIAL_CELL_SIZE)
       const cellY = Math.floor(enemy.y / ENEMY_SPATIAL_CELL_SIZE)
       let separationX = 0
@@ -231,43 +250,37 @@ export class RiftServitorSwarm {
         }
       }
 
-      if (!enemy.commit && trackingTarget && targetDistance <= ENEMY_COMMIT_DISTANCE) {
+      if (!enemy.commit && trackingTarget && playerDistance <= this.commitDistance) {
         enemy.commit = true
-        enemy.commitElapsed = 0
-        const commitLength = Math.hypot(toTargetX, toTargetY) || 1
-        enemy.commitDirectionX = toTargetX / commitLength
-        enemy.commitDirectionY = toTargetY / commitLength
+        const commitLength = Math.hypot(playerDeltaX, playerDeltaY) || 1
+        enemy.commitDirectionX = playerDeltaX / commitLength
+        enemy.commitDirectionY = playerDeltaY / commitLength
       }
 
       if (enemy.commit) {
-        enemy.commitElapsed += deltaSeconds
-        if (enemy.commitElapsed >= ENEMY_COMMIT_MAX_DURATION) {
-          enemy.health = 0
-          enemy.hitbox.health = 0
-          enemy.display.visible = false
-          this.onEnemyDeath?.({
-            id: enemy.id,
-            x: enemy.x,
-            y: enemy.y + enemy.hitboxCenterYOffset,
-            reason: 'commit',
-          })
-          onPlayerCollision({
-            x: enemy.x,
-            y: enemy.y + enemy.hitboxCenterYOffset,
-            damage: 0,
-          })
-          return
-        }
         deltaX = enemy.commitDirectionX
         deltaY = enemy.commitDirectionY
+      } else if (!trackingTarget && this.flightPath.length > 0) {
+        while (enemy.pathIndex < this.flightPath.length) {
+          const waypoint = this.flightPath[enemy.pathIndex]
+          const waypointDeltaX = waypoint.x - enemy.x
+          const waypointDeltaY = waypoint.y - enemy.y
+          const waypointDistance = Math.hypot(waypointDeltaX, waypointDeltaY)
+          if (waypointDistance > ENEMY_SPEED * deltaSeconds) {
+            deltaX = waypointDeltaX
+            deltaY = waypointDeltaY
+            break
+          }
+          enemy.pathIndex += 1
+        }
       } else {
         const shouldRefreshSeek =
           Math.random() < ENEMY_TRACK_UPDATE_CHANCE ||
           (enemy.seekDirectionX === 0 && enemy.seekDirectionY === 1)
         if (trackingTarget && shouldRefreshSeek) {
-          const seekLength = Math.hypot(toTargetX, toTargetY) || 1
-          enemy.seekDirectionX = toTargetX / seekLength
-          enemy.seekDirectionY = toTargetY / seekLength
+          const seekLength = Math.hypot(playerDeltaX, playerDeltaY) || 1
+          enemy.seekDirectionX = playerDeltaX / seekLength
+          enemy.seekDirectionY = playerDeltaY / seekLength
         }
         const desiredDirectionX = enemy.seekDirectionX + separationX
         const desiredDirectionY = enemy.seekDirectionY + separationY
@@ -289,7 +302,8 @@ export class RiftServitorSwarm {
       }
 
       const length = enemy.commit ? 1 : Math.hypot(deltaX, deltaY) || 1
-      const speed = enemy.commit ? ENEMY_COMMIT_SPEED : ENEMY_SPEED
+      const commitSpeed = ENEMY_SPEED * this.commitSpeedMultiplier
+      const speed = enemy.commit ? commitSpeed : ENEMY_SPEED
       enemy.velocityX = (deltaX / length) * speed
       enemy.velocityY = (deltaY / length) * speed
       enemy.x += enemy.velocityX * deltaSeconds
@@ -297,25 +311,12 @@ export class RiftServitorSwarm {
       enemy.display.position.set(enemy.x, enemy.y)
       enemy.display.rotation = Math.atan2(enemy.velocityY, enemy.velocityX) - Math.PI * 0.5
 
-      if (targetDistance <= ENEMY_EXPLODE_DISTANCE) {
-        enemy.health = 0
-        enemy.hitbox.health = 0
-        enemy.display.visible = false
-        this.onEnemyDeath?.({
-          id: enemy.id,
-          x: enemy.x,
-          y: enemy.y + enemy.hitboxCenterYOffset,
-          reason: 'explode',
-        })
-        onPlayerCollision({
-          x: enemy.x,
-          y: enemy.y + enemy.hitboxCenterYOffset,
-          damage: ENEMY_CONTACT_DAMAGE,
-        })
-        return
-      }
-
-      if (enemy.y > this.bottomLimit) {
+      if (
+        enemy.x < this.leftLimit ||
+        enemy.x > this.rightLimit ||
+        enemy.y < this.topLimit ||
+        enemy.y > this.bottomLimit
+      ) {
         enemy.health = 0
         enemy.hitbox.health = 0
         enemy.display.visible = false
@@ -335,7 +336,34 @@ export class RiftServitorSwarm {
       enemy.hitbox.centerX = enemy.x
       enemy.hitbox.centerY = enemy.y + enemy.hitboxCenterYOffset
       enemy.hitbox.health = enemy.health
-      enemy.runtime.updateAnimation(this.elapsedSeconds, speed / ENEMY_COMMIT_SPEED)
+
+      const playerBounds = seekTarget?.bounds
+      const collidedWithPlayer =
+        playerBounds &&
+        enemy.hitbox.left <= playerBounds.right &&
+        enemy.hitbox.right >= playerBounds.left &&
+        enemy.hitbox.top <= playerBounds.bottom &&
+        enemy.hitbox.bottom >= playerBounds.top
+
+      if (collidedWithPlayer) {
+        enemy.health = 0
+        enemy.hitbox.health = 0
+        enemy.display.visible = false
+        this.onEnemyDeath?.({
+          id: enemy.id,
+          x: enemy.x,
+          y: enemy.y + enemy.hitboxCenterYOffset,
+          reason: 'explode',
+        })
+        onPlayerCollision({
+          x: enemy.x,
+          y: enemy.y + enemy.hitboxCenterYOffset,
+          damage: ENEMY_CONTACT_DAMAGE,
+        })
+        return
+      }
+
+      enemy.runtime.updateAnimation(this.elapsedSeconds, speed / commitSpeed)
     })
   }
 
@@ -345,5 +373,9 @@ export class RiftServitorSwarm {
     })
     this.enemies.length = 0
     this.hitboxes.length = 0
+  }
+
+  isFinished() {
+    return this.enemies.length > 0 && this.enemies.every((enemy) => enemy.health <= 0)
   }
 }

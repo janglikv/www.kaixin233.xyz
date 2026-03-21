@@ -21,7 +21,7 @@ export const createStatsPanel = ({ x, y, stats }) => {
   const update = (nextStats) => {
     text.text = [
       `攻击力 ${nextStats.attackPower}`,
-      `攻速 ${nextStats.attackSpeed.toFixed(1)}/s`,
+      `攻速 ${nextStats.attackSpeed.toFixed(1)}`,
       `暴击 ${(nextStats.critChance * 100).toFixed(0)}%`,
     ].join('\n')
   }
