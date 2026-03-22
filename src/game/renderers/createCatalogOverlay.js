@@ -29,7 +29,7 @@ const createCoinPreview = () => {
   return root
 }
 
-export const createModalCloseButton = ({ x, y, onTap }) => {
+export const createModalCloseButton = ({ x, y, onTap, onHover }) => {
   const button = new PIXI.Container()
   const glow = new PIXI.Graphics()
   const bg = new PIXI.Graphics()
@@ -76,6 +76,7 @@ export const createModalCloseButton = ({ x, y, onTap }) => {
   button.addChild(icon)
   button.on('pointertap', onTap)
   button.on('pointerover', () => {
+    onHover?.()
     hovered = true
     draw()
   })
@@ -428,7 +429,7 @@ const animatePreviewGraphic = (preview, deltaSeconds, elapsedSeconds) => {
   return deltaSeconds
 }
 
-const createPreviewCard = (entry, x, y, onOpenPreview) => {
+const createPreviewCard = (entry, x, y, onOpenPreview, onUiHover) => {
   const card = new PIXI.Container()
   card.position.set(x, y)
   card.eventMode = 'static'
@@ -437,6 +438,9 @@ const createPreviewCard = (entry, x, y, onOpenPreview) => {
   card.on('pointertap', (event) => {
     event.stopPropagation()
     onOpenPreview(entry)
+  })
+  card.on('pointerover', () => {
+    onUiHover?.()
   })
 
   const code = new PIXI.Text({
@@ -474,7 +478,18 @@ const createPreviewCard = (entry, x, y, onOpenPreview) => {
   return card
 }
 
-export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, onPreviewOpen, onPreviewClose }) => {
+export const createCatalogOverlay = ({
+  x,
+  y,
+  width,
+  height,
+  entries,
+  onClose,
+  onPreviewOpen,
+  onPreviewClose,
+  onUiHover,
+  onUiClick,
+}) => {
   const container = new PIXI.Container()
   container.position.set(x, y)
   container.visible = false
@@ -507,6 +522,7 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
 
     modalOverlay.visible = false
     activePreviewCode = null
+    onUiClick?.()
     onPreviewClose?.()
   }
 
@@ -547,6 +563,7 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
   const modalCloseButton = createModalCloseButton({
     x: MODAL_WIDTH - CLOSE_SIZE - 22,
     y: 20,
+    onHover: onUiHover,
     onTap: (event) => {
       event.stopPropagation()
       closePreviewModal()
@@ -607,6 +624,7 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
     previewElapsedSeconds = 0
     activePreviewCode = entry.code
     modalOverlay.visible = true
+    onUiClick?.()
     onPreviewOpen?.(entry.code)
   }
 
@@ -617,6 +635,9 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
     .stroke({ color: 0x48638f, width: 2, alpha: 0.95 })
   closeBg.eventMode = 'static'
   closeBg.cursor = 'pointer'
+  closeBg.on('pointerover', () => {
+    onUiHover?.()
+  })
   closeBg.on('pointertap', onClose)
   container.addChild(closeBg)
 
@@ -638,7 +659,7 @@ export const createCatalogOverlay = ({ x, y, width, height, entries, onClose, on
     const row = Math.floor(index / GRID_COLUMNS)
     const cardX = PANEL_PADDING + column * (CARD_WIDTH + GRID_GAP_X)
     const cardY = GRID_START_Y + row * (CARD_HEIGHT + GRID_GAP_Y)
-    container.addChild(createPreviewCard(entry, cardX, cardY, openPreviewModal))
+    container.addChild(createPreviewCard(entry, cardX, cardY, openPreviewModal, onUiHover))
   })
 
   container.addChild(modalOverlay)

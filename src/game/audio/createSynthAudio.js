@@ -306,6 +306,26 @@ const createUiBuffer = (context, { high = false } = {}) =>
     softClip(right)
   })
 
+const createUiHoverBuffer = (context) =>
+  createBuffer(context, 0.08, ({ left, right, sampleRate }) => {
+    addTone({
+      left,
+      right,
+      sampleRate,
+      duration: 0.055,
+      frequencyStart: 720,
+      frequencyEnd: 980,
+      attack: 0.001,
+      decay: 0.02,
+      sustain: 0.08,
+      release: 0.02,
+      gain: 0.09,
+      wave: 'sine',
+    })
+    softClip(left)
+    softClip(right)
+  })
+
 const createGameOverBuffer = (context) =>
   createBuffer(context, 2.8, ({ left, right, sampleRate }) => {
     const chordA = [146.83, 174.61, 220]
@@ -466,6 +486,103 @@ const createMusicBuffer = (context) => {
   })
 }
 
+const createHomeMusicBuffer = (context) => {
+  const beat = 60 / 96
+  const bar = beat * 4
+  const progression = [
+    [130.81, [261.63, 329.63, 392]],
+    [98, [196, 246.94, 329.63]],
+    [110, [220, 277.18, 329.63]],
+    [87.31, [174.61, 220, 293.66]],
+  ]
+  const loopDuration = progression.length * bar
+
+  return createBuffer(context, loopDuration, ({ left, right, sampleRate }) => {
+    const random = createDeterministicRandom(1841)
+
+    progression.forEach(([bassRoot, chord], barIndex) => {
+      const barStart = barIndex * bar
+
+      addTone({
+        left,
+        right,
+        sampleRate,
+        start: barStart,
+        duration: bar + beat * 0.25,
+        frequencyStart: bassRoot,
+        frequencyEnd: bassRoot * 0.985,
+        attack: 0.06,
+        decay: 0.38,
+        sustain: 0.42,
+        release: 0.52,
+        gain: 0.16,
+        pan: -0.08,
+        wave: 'triangle',
+      })
+
+      chord.forEach((frequency, chordIndex) => {
+        addTone({
+          left,
+          right,
+          sampleRate,
+          start: barStart + beat * (0.5 + chordIndex * 0.9),
+          duration: beat * 0.46,
+          frequencyStart: frequency * 2,
+          frequencyEnd: frequency * 2.01,
+          attack: 0.012,
+          decay: 0.09,
+          sustain: 0.08,
+          release: 0.07,
+          gain: 0.028,
+          pan: (chordIndex - 1) * 0.24,
+          wave: 'sine',
+        })
+      })
+
+      for (let pulseIndex = 0; pulseIndex < 8; pulseIndex += 1) {
+        const note = chord[(pulseIndex + barIndex) % chord.length] * (pulseIndex % 3 === 0 ? 2 : 1)
+        addTone({
+          left,
+          right,
+          sampleRate,
+          start: barStart + pulseIndex * (beat / 2),
+          duration: beat * 0.34,
+          frequencyStart: note,
+          frequencyEnd: note * 0.998,
+          attack: 0.01,
+          decay: 0.12,
+          sustain: 0.14,
+          release: 0.08,
+          gain: 0.045,
+          pan: pulseIndex % 2 === 0 ? 0.18 : -0.18,
+          wave: 'triangle',
+          vibratoDepth: 3,
+          vibratoRate: 4.2,
+        })
+      }
+
+      for (let textureIndex = 0; textureIndex < 6; textureIndex += 1) {
+        addNoise({
+          left,
+          right,
+          sampleRate,
+          random,
+          start: barStart + textureIndex * (beat * 0.65) + 0.02,
+          duration: 0.12,
+          attack: 0.01,
+          decay: 0.1,
+          gain: 0.018,
+          lowpass: 0.78,
+          pan: textureIndex % 2 === 0 ? -0.12 : 0.12,
+        })
+      }
+    })
+
+    softClip(left)
+    softClip(right)
+  })
+}
+
 export const createSynthAudio = () => {
   let context = null
   let masterGain = null
@@ -481,6 +598,8 @@ export const createSynthAudio = () => {
   let hitCooldown = 0
   let explosionCooldown = 0
   let homingCooldown = 0
+  let hoverCooldown = 0
+  let musicCue = 'battle'
 
   const throttle = (lastTime, interval) => {
     const now = performance.now()
@@ -520,7 +639,9 @@ export const createSynthAudio = () => {
             homing: createHomingBuffer(context),
             ui: createUiBuffer(context),
             uiHigh: createUiBuffer(context, { high: true }),
+            uiHover: createUiHoverBuffer(context),
             gameOver: createGameOverBuffer(context),
+            homeMusicLoop: createHomeMusicBuffer(context),
             musicLoop: createMusicBuffer(context),
           }
           building = null
@@ -535,7 +656,10 @@ export const createSynthAudio = () => {
 
   const ready = () => unlocked && context && bufferBank
   const getMasterTargetGain = () => (musicEnabled ? 0.64 : 0)
-  const getMusicTargetGain = () => (musicEnabled ? 0.72 : 0)
+  const getMusicTargetGain = () => {
+    if (!musicEnabled) return 0
+    return musicCue === 'home' ? 0.48 : 0.72
+  }
 
   const stopMusic = () => {
     if (!musicSource) return
@@ -550,8 +674,9 @@ export const createSynthAudio = () => {
 
   const ensureMusic = () => {
     if (!ready() || musicSource || !musicEnabled) return
+    const musicBuffer = musicCue === 'home' ? bufferBank.homeMusicLoop : bufferBank.musicLoop
     musicSource = context.createBufferSource()
-    musicSource.buffer = bufferBank.musicLoop
+    musicSource.buffer = musicBuffer
     musicSource.loop = true
     musicSource.connect(musicGain)
     musicSource.start()
@@ -616,6 +741,12 @@ export const createSynthAudio = () => {
       if (!ready()) return
       playBuffer(high ? bufferBank.uiHigh : bufferBank.ui, { gain: 0.46 })
     },
+    playUiHover() {
+      const { allowed, now } = throttle(hoverCooldown, 45)
+      if (!allowed || !ready()) return
+      hoverCooldown = now
+      playBuffer(bufferBank.uiHover, { gain: 0.34 })
+    },
     playGameOver() {
       if (!ready() || gameOverPlayed || !musicEnabled) return
       gameOverPlayed = true
@@ -626,8 +757,10 @@ export const createSynthAudio = () => {
     },
     resetRunState() {
       gameOverPlayed = false
+      musicCue = 'battle'
       if (!ready()) return
       if (musicEnabled) {
+        stopMusic()
         ensureMusic()
       } else {
         stopMusic()
@@ -641,6 +774,19 @@ export const createSynthAudio = () => {
     },
     isMusicEnabled() {
       return musicEnabled
+    },
+    setMusicCue(nextCue) {
+      const normalizedCue = nextCue === 'home' ? 'home' : 'battle'
+      if (musicCue === normalizedCue) return
+      musicCue = normalizedCue
+      if (!context || !musicGain) return
+      stopMusic()
+      if (musicEnabled) {
+        ensureMusic()
+      }
+      musicGain.gain.cancelScheduledValues(context.currentTime)
+      musicGain.gain.setValueAtTime(musicGain.gain.value, context.currentTime)
+      musicGain.gain.linearRampToValueAtTime(getMusicTargetGain(), context.currentTime + 0.16)
     },
     setMusicEnabled(nextEnabled) {
       musicEnabled = Boolean(nextEnabled)

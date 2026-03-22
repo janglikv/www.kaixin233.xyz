@@ -2,7 +2,7 @@ import * as PIXI from 'pixi.js'
 
 const BUTTON_SIZE = 34
 
-export const createSettingsButton = ({ x, y, onTap }) => {
+export const createSettingsButton = ({ x, y, onTap, onHover }) => {
   const container = new PIXI.Container()
   container.position.set(x, y)
   container.eventMode = 'static'
@@ -46,7 +46,10 @@ export const createSettingsButton = ({ x, y, onTap }) => {
   container.addChild(bg)
   container.addChild(icon)
   container.on('pointertap', onTap)
-  container.on('pointerover', () => draw(true))
+  container.on('pointerover', () => {
+    onHover?.()
+    draw(true)
+  })
   container.on('pointerout', () => draw(false))
 
   return {

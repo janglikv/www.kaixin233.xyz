@@ -1,4 +1,5 @@
-import * as PIXI from 'pixi.js'
+﻿import * as PIXI from 'pixi.js'
+import { createSynthAudio } from '../audio/createSynthAudio'
 import { CATALOG_ENTRIES } from '../data/catalogEntries'
 import { SHIP_CATALOG } from '../data/shipCatalog'
 import { PLAYER_SHIP_THEME } from '../data/shipCatalog'
@@ -137,7 +138,7 @@ const createPanelFrame = ({ x, y, width, height, radius = 26 }) => {
   return container
 }
 
-const createHomePanelTab = ({ x, y, label, active = false, onTap }) => {
+const createHomePanelTab = ({ x, y, label, active = false, onTap, onHover, onTapSound }) => {
   const container = new PIXI.Container()
   const bg = new PIXI.Graphics()
   const text = new PIXI.Text({
@@ -175,8 +176,14 @@ const createHomePanelTab = ({ x, y, label, active = false, onTap }) => {
   text.position.set(57, 23)
   container.addChild(bg)
   container.addChild(text)
-  container.on('pointertap', onTap)
-  container.on('pointerover', () => draw(true))
+  container.on('pointertap', () => {
+    onTapSound?.()
+    onTap?.()
+  })
+  container.on('pointerover', () => {
+    onHover?.()
+    draw(true)
+  })
   container.on('pointerout', () => draw(false))
 
   return {
@@ -279,7 +286,7 @@ const createShipPreviewPanel = ({ x, y, width, height }) => {
   }
 }
 
-const createStartButton = ({ x, y, width, height, label, onTap }) => {
+const createStartButton = ({ x, y, width, height, label, onTap, onHover, onTapSound }) => {
   const container = new PIXI.Container()
   container.position.set(x, y)
   container.eventMode = 'static'
@@ -336,10 +343,12 @@ const createStartButton = ({ x, y, width, height, label, onTap }) => {
   container.addChild(text)
   container.on('pointertap', () => {
     if (!enabled) return
+    onTapSound?.()
     onTap?.()
   })
   container.on('pointerover', () => {
     if (!enabled) return
+    onHover?.()
     draw(true)
   })
   container.on('pointerout', () => draw(false))
@@ -493,7 +502,17 @@ const createTacticalChipIcon = ({ size }) => {
   }
 }
 
-const createModalButton = ({ x, y, width, height, label, onTap, variant = 'primary' }) => {
+const createModalButton = ({
+  x,
+  y,
+  width,
+  height,
+  label,
+  onTap,
+  variant = 'primary',
+  onHover,
+  onTapSound,
+}) => {
   const container = new PIXI.Container()
   container.position.set(x, y)
   container.eventMode = 'static'
@@ -545,9 +564,13 @@ const createModalButton = ({ x, y, width, height, label, onTap, variant = 'prima
   container.addChild(text)
   container.on('pointertap', (event) => {
     event.stopPropagation()
+    onTapSound?.()
     onTap?.()
   })
-  container.on('pointerover', () => draw(true))
+  container.on('pointerover', () => {
+    onHover?.()
+    draw(true)
+  })
   container.on('pointerout', () => draw(false))
 
   return {
@@ -558,7 +581,15 @@ const createModalButton = ({ x, y, width, height, label, onTap, variant = 'prima
   }
 }
 
-const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, onSellItem }) => {
+const createItemDetailModal = ({
+  width,
+  height,
+  onToggleEquip,
+  onPurchaseItem,
+  onSellItem,
+  onUiHover,
+  onUiClick,
+}) => {
   const container = new PIXI.Container()
   container.visible = false
 
@@ -569,6 +600,7 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
   overlay.eventMode = 'static'
   overlay.cursor = 'default'
   overlay.on('pointertap', () => {
+    onUiClick?.()
     container.visible = false
   })
   container.addChild(overlay)
@@ -594,8 +626,10 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
   const closeButton = createModalCloseButton({
     x: panelWidth - 51,
     y: 21,
+    onHover: onUiHover,
     onTap: (event) => {
       event.stopPropagation()
+      onUiClick?.()
       container.visible = false
     },
   })
@@ -659,14 +693,66 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
   const buttonRowStartX = (panelWidth - buttonRowWidth) * 0.5
   const buttonRowY = panelHeight - 84
 
+  let currentItem = null
+  let currentIcon = null
+  let currentMode = 'warehouse'
+  let currentOwned = false
+  let currentEquipped = false
+  let sellConfirmPending = false
+
+  const getDefaultStatusText = () =>
+    currentMode === 'shop'
+      ? currentOwned
+        ? '当前状态: 已拥有'
+        : `当前状态: 售价 ${currentItem?.price ?? ITEM_PRICE} 金币`
+      : currentEquipped
+        ? '当前状态: 已装备'
+        : '当前状态: 未装备'
+
+  const restoreStatusText = () => {
+    statusText.text = getDefaultStatusText()
+  }
+
+  const syncButtons = () => {
+    actionButton.setLabel(
+      sellConfirmPending
+        ? '取消'
+        : currentMode === 'shop'
+          ? currentOwned
+            ? '已拥有'
+            : `购买 ${currentItem?.price ?? ITEM_PRICE}`
+          : currentEquipped
+            ? '取消装备'
+            : '装备',
+    )
+
+    const canSell = currentMode === 'warehouse' && currentOwned && !isBaseWarehouseItem(currentItem)
+    sellButton.container.visible = canSell
+    if (canSell) {
+      sellButton.setLabel(
+        sellConfirmPending
+          ? '确认出售'
+          : `出售 ${getItemSellPrice(currentItem)}`,
+      )
+    }
+  }
+
   const actionButton = createModalButton({
     x: buttonRowStartX,
     y: buttonRowY,
     width: actionButtonWidth,
     height: 52,
     label: '装备',
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       if (!currentItem) return
+      if (sellConfirmPending) {
+        sellConfirmPending = false
+        syncButtons()
+        restoreStatusText()
+        return
+      }
       if (currentMode === 'shop') {
         if (currentOwned) return
         const result = onPurchaseItem?.(currentItem.id)
@@ -689,10 +775,20 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
     height: 52,
     label: '出售',
     variant: 'secondary',
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       if (!currentItem) return
+      if (!sellConfirmPending) {
+        sellConfirmPending = true
+        syncButtons()
+        statusText.text = `确认出售后将获得 ${getItemSellPrice(currentItem)} 金币`
+        return
+      }
       const result = onSellItem?.(currentItem.id)
       if (result?.ok === false) {
+        sellConfirmPending = false
+        syncButtons()
         statusText.text = result.message ?? '当前状态: 出售失败'
         return
       }
@@ -701,14 +797,10 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
   })
   panel.addChild(sellButton.container)
 
-  let currentItem = null
-  let currentIcon = null
-  let currentMode = 'warehouse'
-  let currentOwned = false
-
   return {
     container,
     hide() {
+      sellConfirmPending = false
       container.visible = false
     },
     update(item, equippedState, options = {}) {
@@ -719,30 +811,19 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
       currentItem = item
       currentMode = mode
       currentOwned = owned
+      currentEquipped = equipped
+      sellConfirmPending = false
       titleText.text = item.name
-      statusText.text =
-        mode === 'shop'
-          ? owned
-            ? '当前状态: 已拥有'
-            : `当前状态: 售价 ${item.price ?? ITEM_PRICE} 金币`
-          : equipped
-            ? '当前状态: 已装备'
-            : '当前状态: 未装备'
+      restoreStatusText()
       descText.text = item.description
-      actionButton.setLabel(
-        mode === 'shop' ? (owned ? '已拥有' : `购买 ${item.price ?? ITEM_PRICE}`) : equipped ? '取消装备' : '装备',
-      )
-      sellButton.container.visible = mode === 'warehouse' && owned && !isBaseWarehouseItem(item)
-      if (sellButton.container.visible) {
-        sellButton.setLabel(`出售 ${getItemSellPrice(item)}`)
-      }
+      syncButtons()
 
       if (currentIcon) {
         iconHost.removeChild(currentIcon.container)
         currentIcon.container.destroy({ children: true })
       }
       currentIcon = item.drawIcon({ size: 196 })
-      currentIcon.update?.(equipped || owned)
+      currentIcon.update?.(mode === 'shop' ? owned : equipped || owned)
       iconHost.addChild(currentIcon.container)
       container.visible = true
     },
@@ -756,7 +837,18 @@ const createItemDetailModal = ({ width, height, onToggleEquip, onPurchaseItem, o
   }
 }
 
-const createInventorySlot = ({ x, y, size, equipped, drawIcon, price = null, onTap }) => {
+const createInventorySlot = ({
+  x,
+  y,
+  size,
+  equipped,
+  showEquippedMarker = true,
+  drawIcon,
+  price = null,
+  onTap,
+  onHover,
+  onTapSound,
+}) => {
   const scale = size / 184
   const slot = new PIXI.Container()
   slot.position.set(x, y)
@@ -778,22 +870,23 @@ const createInventorySlot = ({ x, y, size, equipped, drawIcon, price = null, onT
   })
 
   const draw = (hovered = false, isEquipped = equipped) => {
+    const displayEquipped = showEquippedMarker && isEquipped
     bg
       .clear()
       .roundRect(0, 0, size, size, 22 * scale)
       .fill({
-        color: isEquipped ? 0x2f2410 : 0x101318,
+        color: displayEquipped ? 0x2f2410 : 0x101318,
         alpha: 0.96,
       })
       .stroke({
-        color: isEquipped ? 0xffd86c : hovered ? 0x7fcfff : 0x2a4467,
-        width: isEquipped ? 3 : 2,
+        color: displayEquipped ? 0xffd86c : hovered ? 0x7fcfff : 0x2a4467,
+        width: displayEquipped ? 3 : 2,
         alpha: 0.95,
       })
 
-    icon.update?.(isEquipped || hovered)
+    icon.update?.(displayEquipped || hovered)
 
-    badge.visible = isEquipped
+    badge.visible = displayEquipped
     badge
       .clear()
       .roundRect(size - 50 * scale, 8 * scale, 40 * scale, 40 * scale, 10 * scale)
@@ -820,9 +913,11 @@ const createInventorySlot = ({ x, y, size, equipped, drawIcon, price = null, onT
   slot.addChild(badge)
   slot.addChild(priceText)
   slot.on('pointertap', () => {
+    onTapSound?.()
     onTap?.()
   })
   slot.on('pointerover', () => {
+    onHover?.()
     draw(true, equipped)
   })
   slot.on('pointerout', () => {
@@ -968,6 +1063,8 @@ const createInventoryPanel = ({
   coinCount = 0,
   purchasedItemIds = [],
   onSelectItem,
+  onUiHover,
+  onUiClick,
 }) => {
   const container = createPanelFrame({ x, y, width, height })
   let currentEquippedState = equippedState
@@ -1014,6 +1111,8 @@ const createInventoryPanel = ({
     y: 16,
     label: '仓库',
     active: true,
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       showWarehouse()
     },
@@ -1023,6 +1122,8 @@ const createInventoryPanel = ({
     y: 16,
     label: '商城',
     active: false,
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       showShop()
     },
@@ -1075,8 +1176,11 @@ const createInventoryPanel = ({
         y: 86 + row * (slotSize + rowGap),
         size: slotSize,
         equipped: isItemEquipped(item, currentEquippedState),
+        showEquippedMarker: mode !== 'shop',
         drawIcon: item.drawIcon,
         price: mode === 'shop' ? item.price ?? ITEM_PRICE : null,
+        onHover: onUiHover,
+        onTapSound: onUiClick,
         onTap: () => {
           onSelectItem(item, mode)
         },
@@ -1190,6 +1294,9 @@ export class HomeController {
     const readPersistedSettings = () =>
       normalizeGameSettings(loadGameSettings(GAME_SETTINGS_DEFAULTS))
     const persistedSettings = readPersistedSettings()
+    const audio = createSynthAudio()
+    audio.setMusicCue('home')
+    audio.setMusicEnabled(persistedSettings.musicEnabled !== false)
     let isPressureTestEnabled = persistedSettings.pressureTestEnabled
     let debugSceneMode = persistedSettings.debugSceneMode
     let equippedState = {
@@ -1232,6 +1339,7 @@ export class HomeController {
       playerMaxHealth = nextSettings.playerMaxHealth ?? PLAYER_STATS.playerMaxHealth
       coinCount = nextSettings.coinCount ?? 0
       purchasedItemIds = nextSettings.purchasedItemIds ?? []
+      audio.setMusicEnabled(isMusicEnabled)
     }
 
     const persistSettings = (overrides = {}) => {
@@ -1259,6 +1367,11 @@ export class HomeController {
       )
     }
 
+    const unlockAudio = () => {
+      audio.unlock()
+    }
+    app.canvas.addEventListener('pointerdown', unlockAudio, { passive: true })
+
     const spaceBackdrop = createSpaceBackdrop({
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
@@ -1281,15 +1394,27 @@ export class HomeController {
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
       entries: CATALOG_ENTRIES,
+      onUiHover: () => {
+        audio.unlock()
+        audio.playUiHover()
+      },
+      onUiClick: () => {
+        audio.unlock()
+        audio.playUiClick()
+      },
       onPreviewOpen: (code) => {
         activeCatalogPreviewCode = code
         persistSettings()
       },
       onPreviewClose: () => {
+        audio.unlock()
+        audio.playUiClick()
         activeCatalogPreviewCode = null
         persistSettings()
       },
       onClose: () => {
+        audio.unlock()
+        audio.playUiClick()
         catalogOverlay.hide()
         isCatalogVisible = false
         activeCatalogPreviewCode = null
@@ -1319,6 +1444,14 @@ export class HomeController {
       height: LOGICAL_HEIGHT,
       showLeaveButton: false,
       state: getSettingsOverlayState(),
+      onUiHover: () => {
+        audio.unlock()
+        audio.playUiHover()
+      },
+      onUiClick: () => {
+        audio.unlock()
+        audio.playUiClick()
+      },
       getDomRect: ({ x: logicalX, y: logicalY, width: logicalWidth, height: logicalHeight }) => {
         const rect = app.canvas.getBoundingClientRect()
         return {
@@ -1330,6 +1463,11 @@ export class HomeController {
       },
       onMusicToggle: (enabled) => {
         isMusicEnabled = enabled
+        audio.unlock()
+        audio.setMusicEnabled(enabled)
+        if (enabled) {
+          audio.playUiClick({ high: true })
+        }
         persistSettings()
         settingsOverlay.update(getSettingsOverlayState())
       },
@@ -1438,6 +1576,8 @@ export class HomeController {
         return { ok: true }
       },
       onCatalogOpen: () => {
+        audio.unlock()
+        audio.playUiClick()
         settingsOverlay.hide()
         catalogOverlay.toggle()
         isCatalogVisible = catalogOverlay.isVisible()
@@ -1469,13 +1609,21 @@ export class HomeController {
         })
       },
       onClose: () => {
+        audio.unlock()
+        audio.playUiClick()
         settingsOverlay.hide()
       },
     })
     const settingsButton = createSettingsButton({
       x: LOGICAL_WIDTH - 64,
       y: 28,
+      onHover: () => {
+        audio.unlock()
+        audio.playUiHover()
+      },
       onTap: () => {
+        audio.unlock()
+        audio.playUiClick({ high: settingsOverlay.isVisible() !== true })
         settingsOverlay.toggle()
         settingsOverlay.update(getSettingsOverlayState())
       },
@@ -1485,6 +1633,14 @@ export class HomeController {
     const itemDetailModal = createItemDetailModal({
       width: LOGICAL_WIDTH,
       height: LOGICAL_HEIGHT,
+      onUiHover: () => {
+        audio.unlock()
+        audio.playUiHover()
+      },
+      onUiClick: () => {
+        audio.unlock()
+        audio.playUiClick()
+      },
       onToggleEquip: (itemId) => {
         const selectedItem = INVENTORY_ITEMS.find((item) => item.id === itemId)
         if (!selectedItem) return
@@ -1573,6 +1729,8 @@ export class HomeController {
       label: '开始游戏',
       onTap: () => {
         if (!canStartGame(equippedState)) return
+        audio.unlock()
+        audio.playUiClick({ high: true })
         isPressureTestEnabled = false
         debugSceneMode = null
         persistSettings({
@@ -1593,6 +1751,14 @@ export class HomeController {
       equippedState,
       coinCount,
       purchasedItemIds,
+      onUiHover: () => {
+        audio.unlock()
+        audio.playUiHover()
+      },
+      onUiClick: () => {
+        audio.unlock()
+        audio.playUiClick()
+      },
       onSelectItem: (item, mode) => {
         itemDetailModal.update(item, equippedState, {
           mode,
@@ -1661,10 +1827,12 @@ export class HomeController {
 
       app.renderer.off('resize', layout)
       app.ticker.remove(tick)
+      app.canvas.removeEventListener('pointerdown', unlockAudio)
       window.removeEventListener('game-settings-changed', syncFromStorage)
       previewPanel.destroy()
       inventoryPanel.destroy()
       itemDetailModal.destroy()
+      audio.destroy()
 
       if (initialized) {
         app.destroy(true, { children: true })
@@ -1679,3 +1847,4 @@ export class HomeController {
     this.cleanupFn = null
   }
 }
+

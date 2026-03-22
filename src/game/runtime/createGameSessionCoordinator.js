@@ -98,6 +98,7 @@ export const createGameSessionCoordinator = ({
     },
     createOverlayHandlers() {
       return {
+        onUiHover: () => audio.playUiHover(),
         onUiClick: (options) => audio.playUiClick(options),
         onPreviewOpen: (code) => {
           persistSettings({

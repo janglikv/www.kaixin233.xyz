@@ -35,6 +35,7 @@ export class BattleOverlayController {
     initialFpsVisible = true,
     getSettingsState,
     getDomRect,
+    onUiHover,
     onUiClick,
     onPreviewOpen,
     onPreviewClose,
@@ -109,6 +110,10 @@ export class BattleOverlayController {
         this.activePreviewCode = null
         onPreviewClose?.()
       },
+      onUiHover,
+      onUiClick: () => {
+        this.onUiClick?.()
+      },
       onClose: () => {
         this.onUiClick?.()
         this.catalogOverlay.hide()
@@ -125,6 +130,10 @@ export class BattleOverlayController {
       height,
       state: getSettingsState(),
       getDomRect,
+      onUiHover,
+      onUiClick: () => {
+        this.onUiClick?.()
+      },
       onMusicToggle: onMusicToggle,
       onFpsToggle: (enabled) => {
         onFpsToggle?.(enabled)
@@ -218,6 +227,7 @@ export class BattleOverlayController {
     this.settingsButton = createSettingsButton({
       x: width - 48,
       y: 14,
+      onHover: onUiHover,
       onTap: () => {
         this.onUiClick?.()
         this.settingsOverlay.toggle()

@@ -26,6 +26,8 @@ const createNumericEditModal = ({
   initialValue,
   onConfirm,
   getDomRect,
+  onUiHover,
+  onUiClick,
 }) => {
   const overlay = new PIXI.Container()
   overlay.visible = false
@@ -214,6 +216,8 @@ const createNumericEditModal = ({
       width: 76,
       height: 36,
       label: '取消',
+      onHover: onUiHover,
+      onTapSound: onUiClick,
       onTap: close,
     }),
   )
@@ -224,6 +228,8 @@ const createNumericEditModal = ({
       width: 76,
       height: 36,
       label: '确认',
+      onHover: onUiHover,
+      onTapSound: onUiClick,
       onTap: submit,
       variant: 'success',
     }),
@@ -258,7 +264,17 @@ const createValueText = ({ x, y, width }) => {
   return text
 }
 
-const createControlButton = ({ x, y, width, height, label, onTap, variant = 'default' }) => {
+const createControlButton = ({
+  x,
+  y,
+  width,
+  height,
+  label,
+  onTap,
+  variant = 'default',
+  onHover,
+  onTapSound,
+}) => {
   const button = new PIXI.Container()
   const bg = new PIXI.Graphics()
   const text = new PIXI.Text({
@@ -310,8 +326,14 @@ const createControlButton = ({ x, y, width, height, label, onTap, variant = 'def
   text.position.set(width * 0.5, height * 0.5)
   button.addChild(bg)
   button.addChild(text)
-  button.on('pointertap', onTap)
-  button.on('pointerover', () => draw(true))
+  button.on('pointertap', () => {
+    onTapSound?.()
+    onTap?.()
+  })
+  button.on('pointerover', () => {
+    onHover?.()
+    draw(true)
+  })
   button.on('pointerout', () => draw(false))
 
   return button
@@ -331,7 +353,7 @@ const createLabel = ({ x, y, text }) => {
   return label
 }
 
-const createToggleRow = ({ x, y, label, value, onToggle }) => {
+const createToggleRow = ({ x, y, label, value, onToggle, onUiHover, onUiClick }) => {
   const container = new PIXI.Container()
   const valueText = createValueText({ x: 0, y: 17, width: 412 })
   let currentValue = value
@@ -343,6 +365,8 @@ const createToggleRow = ({ x, y, label, value, onToggle }) => {
     width: ACTION_BUTTON_WIDTH,
     height: ACTION_BUTTON_HEIGHT,
     label: '',
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       currentValue = !currentValue
       update(currentValue)
@@ -383,6 +407,8 @@ const createStepperActionRow = ({
   plusX = 480,
   actionX = 532,
   actionWidth = ACTION_BUTTON_WIDTH,
+  onUiHover,
+  onUiClick,
 }) => {
   const container = new PIXI.Container()
   const valueText = createValueText({ x: 0, y: 17, width: valueWidth })
@@ -397,6 +423,8 @@ const createStepperActionRow = ({
       width: CONTROL_BUTTON_WIDTH,
       height: CONTROL_BUTTON_HEIGHT,
       label: '-',
+      onHover: onUiHover,
+      onTapSound: onUiClick,
       onTap: () => onStep(-1),
     }),
   )
@@ -407,6 +435,8 @@ const createStepperActionRow = ({
       width: CONTROL_BUTTON_WIDTH,
       height: CONTROL_BUTTON_HEIGHT,
       label: '+',
+      onHover: onUiHover,
+      onTapSound: onUiClick,
       onTap: () => onStep(1),
     }),
   )
@@ -417,6 +447,8 @@ const createStepperActionRow = ({
       width: actionWidth,
       height: ACTION_BUTTON_HEIGHT,
       label: actionLabel,
+      onHover: onUiHover,
+      onTapSound: onUiClick,
       onTap: onAction,
     }),
   )
@@ -440,6 +472,8 @@ const createActionRow = ({
   variant = 'default',
   valueWidth = 412,
   buttonX = 428,
+  onUiHover,
+  onUiClick,
 }) => {
   const container = new PIXI.Container()
   const valueText = createValueText({ x: 0, y: 17, width: valueWidth })
@@ -454,6 +488,8 @@ const createActionRow = ({
       width: ACTION_BUTTON_WIDTH,
       height: ACTION_BUTTON_HEIGHT,
       label: buttonLabel,
+      onHover: onUiHover,
+      onTapSound: onUiClick,
       onTap,
       variant,
     }),
@@ -468,7 +504,7 @@ const createActionRow = ({
   }
 }
 
-const createTabButton = ({ x, y, label, active, onTap }) => {
+const createTabButton = ({ x, y, label, active, onTap, onHover, onTapSound }) => {
   const button = new PIXI.Container()
   const bg = new PIXI.Graphics()
   const text = new PIXI.Text({
@@ -506,8 +542,14 @@ const createTabButton = ({ x, y, label, active, onTap }) => {
   text.position.set(60, 20)
   button.addChild(bg)
   button.addChild(text)
-  button.on('pointertap', onTap)
-  button.on('pointerover', () => draw(true))
+  button.on('pointertap', () => {
+    onTapSound?.()
+    onTap?.()
+  })
+  button.on('pointerover', () => {
+    onHover?.()
+    draw(true)
+  })
   button.on('pointerout', () => draw(false))
 
   return {
@@ -519,7 +561,17 @@ const createTabButton = ({ x, y, label, active, onTap }) => {
   }
 }
 
-const createLargeActionButton = ({ x, y, width, height, label, onTap, variant = 'success' }) => {
+const createLargeActionButton = ({
+  x,
+  y,
+  width,
+  height,
+  label,
+  onTap,
+  variant = 'success',
+  onHover,
+  onTapSound,
+}) => {
   const button = new PIXI.Container()
   const bg = new PIXI.Graphics()
   const text = new PIXI.Text({
@@ -569,8 +621,14 @@ const createLargeActionButton = ({ x, y, width, height, label, onTap, variant = 
   text.position.set(width * 0.5, height * 0.5)
   button.addChild(bg)
   button.addChild(text)
-  button.on('pointertap', onTap)
-  button.on('pointerover', () => draw(true))
+  button.on('pointertap', () => {
+    onTapSound?.()
+    onTap?.()
+  })
+  button.on('pointerover', () => {
+    onHover?.()
+    draw(true)
+  })
   button.on('pointerout', () => draw(false))
 
   return {
@@ -602,6 +660,8 @@ export const createSettingsOverlay = ({
   onEnterFixedTargetScene,
   onLeave,
   onClose,
+  onUiHover,
+  onUiClick,
   showLeaveButton = true,
 }) => {
   const container = new PIXI.Container()
@@ -624,6 +684,7 @@ export const createSettingsOverlay = ({
   const closeButton = createModalCloseButton({
     x: width - PANEL_PADDING - CLOSE_SIZE,
     y: PANEL_PADDING,
+    onHover: onUiHover,
     onTap: onClose,
   })
   container.addChild(closeButton)
@@ -646,6 +707,8 @@ export const createSettingsOverlay = ({
     y: TAB_Y,
     label: '基础',
     active: true,
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       activeTab = 'basic'
       basicTab.setActive(true)
@@ -660,6 +723,8 @@ export const createSettingsOverlay = ({
     y: TAB_Y,
     label: '调试',
     active: false,
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       activeTab = 'debug'
       activeDebugPage = 0
@@ -678,6 +743,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y,
     label: '音乐',
     value: state.musicEnabled,
+    onUiHover,
+    onUiClick,
     onToggle: onMusicToggle,
   })
   const fpsRow = createToggleRow({
@@ -685,6 +752,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP,
     label: '帧率',
     value: state.fpsEnabled,
+    onUiHover,
+    onUiClick,
     onToggle: onFpsToggle,
   })
   const impactEffectsRow = createToggleRow({
@@ -692,6 +761,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP * 5,
     label: '爆炸效果',
     value: state.impactEffectsEnabled,
+    onUiHover,
+    onUiClick,
     onToggle: onImpactEffectsToggle,
   })
   const attackPowerRow = createStepperActionRow({
@@ -699,6 +770,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y,
     label: '攻击力',
     value: state.attackPower,
+    onUiHover,
+    onUiClick,
     formatValue: (nextValue) => `${nextValue}`,
     onStep: (direction) => onAdjustStat('attackPower', direction),
     actionLabel: '编辑',
@@ -711,6 +784,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP,
     label: '攻速',
     value: state.attackSpeed,
+    onUiHover,
+    onUiClick,
     formatValue: (nextValue) => nextValue.toFixed(1),
     onStep: (direction) => onAdjustStat('attackSpeed', direction),
     actionLabel: '编辑',
@@ -723,6 +798,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP * 2,
     label: '暴击',
     value: state.critChance,
+    onUiHover,
+    onUiClick,
     formatValue: (nextValue) => `${(nextValue * 100).toFixed(0)}%`,
     onStep: (direction) => onAdjustStat('critChance', direction),
     actionLabel: '编辑',
@@ -735,6 +812,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP * 3,
     label: '生命值',
     value: currentPlayerMaxHealth,
+    onUiHover,
+    onUiClick,
     formatValue: (nextValue) => `${Math.max(1, Math.round(nextValue ?? 10))}`,
     onStep: (direction) => onAdjustStat('playerMaxHealth', direction),
     actionLabel: '编辑',
@@ -747,6 +826,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y + ROW_GAP * 4,
     label: '金币',
     value: Math.max(0, Math.floor(state.coinCount ?? 0)),
+    onUiHover,
+    onUiClick,
     formatValue: (nextValue) => `${Math.max(0, Math.floor(nextValue ?? 0))}`,
     onStep: (direction) => onAdjustStat('coinCount', direction),
     actionLabel: '编辑',
@@ -759,6 +840,8 @@ export const createSettingsOverlay = ({
     y: ROW_START_Y,
     label: '起始进度',
     value: currentDebugStageStartAt,
+    onUiHover,
+    onUiClick,
     formatValue: (nextValue) => `${Number.isFinite(nextValue) ? Math.max(0, Math.round(nextValue)) : 0}`,
     onStep: onAdjustDebugStageStartAt,
     actionLabel: '编辑',
@@ -772,6 +855,8 @@ export const createSettingsOverlay = ({
     label: '资料库',
     buttonLabel: '打开',
     value: '查看飞船资料',
+    onUiHover,
+    onUiClick,
     onTap: onCatalogOpen,
   })
   const clearDataRow = createActionRow({
@@ -780,6 +865,8 @@ export const createSettingsOverlay = ({
     label: '清空数据',
     buttonLabel: '执行',
     value: '重置本地存档',
+    onUiHover,
+    onUiClick,
     onTap: onClearData,
   })
   const pressureTestSceneRow = createActionRow({
@@ -788,6 +875,8 @@ export const createSettingsOverlay = ({
     label: '压测场景',
     buttonLabel: '进入',
     value: '直接进入压测场景',
+    onUiHover,
+    onUiClick,
     onTap: onEnterPressureTestScene,
   })
   const fixedTargetSceneRow = createActionRow({
@@ -796,6 +885,8 @@ export const createSettingsOverlay = ({
     label: '固定靶场',
     buttonLabel: '进入',
     value: '20个固定敌人，单排',
+    onUiHover,
+    onUiClick,
     onTap: onEnterFixedTargetScene,
   })
   const leaveButton = createLargeActionButton({
@@ -804,6 +895,8 @@ export const createSettingsOverlay = ({
     width: LARGE_ACTION_WIDTH,
     height: LARGE_ACTION_HEIGHT,
     label: '撤离',
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: onLeave,
     variant: 'success',
   })
@@ -819,6 +912,8 @@ export const createSettingsOverlay = ({
     width: 120,
     height: LARGE_ACTION_HEIGHT,
     label: '上一页',
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       activeDebugPage = 0
       syncDebugPages()
@@ -830,6 +925,8 @@ export const createSettingsOverlay = ({
     width: 120,
     height: LARGE_ACTION_HEIGHT,
     label: '下一页',
+    onHover: onUiHover,
+    onTapSound: onUiClick,
     onTap: () => {
       activeDebugPage = 1
       syncDebugPages()
@@ -852,6 +949,8 @@ export const createSettingsOverlay = ({
     initialValue: String(state.attackPower),
     onConfirm: (value) => onSaveAttackPower?.(value) ?? { ok: true },
     getDomRect,
+    onUiHover,
+    onUiClick,
   })
 
   const attackSpeedModal = createNumericEditModal({
@@ -863,6 +962,8 @@ export const createSettingsOverlay = ({
     initialValue: String(state.attackSpeed),
     onConfirm: (value) => onSaveAttackSpeed?.(value) ?? { ok: true },
     getDomRect,
+    onUiHover,
+    onUiClick,
   })
 
   const critChanceModal = createNumericEditModal({
@@ -874,6 +975,8 @@ export const createSettingsOverlay = ({
     initialValue: String(Math.round(state.critChance * 100)),
     onConfirm: (value) => onSaveCritChance?.(value) ?? { ok: true },
     getDomRect,
+    onUiHover,
+    onUiClick,
   })
 
   const coinCountModal = createNumericEditModal({
@@ -885,6 +988,8 @@ export const createSettingsOverlay = ({
     initialValue: String(Math.max(0, Math.floor(state.coinCount ?? 0))),
     onConfirm: (value) => onSaveCoinCount?.(value) ?? { ok: true },
     getDomRect,
+    onUiHover,
+    onUiClick,
   })
   const debugStageStartAtModal = createNumericEditModal({
     width,
@@ -895,6 +1000,8 @@ export const createSettingsOverlay = ({
     initialValue: String(currentDebugStageStartAt),
     onConfirm: (value) => onSaveDebugStageStartAt?.(value) ?? { ok: true },
     getDomRect,
+    onUiHover,
+    onUiClick,
   })
   const playerMaxHealthModal = createNumericEditModal({
     width,
@@ -905,6 +1012,8 @@ export const createSettingsOverlay = ({
     initialValue: String(currentPlayerMaxHealth),
     onConfirm: (value) => onSavePlayerMaxHealth?.(value) ?? { ok: true },
     getDomRect,
+    onUiHover,
+    onUiClick,
   })
 
   ;[
