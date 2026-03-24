@@ -1,8 +1,88 @@
 :root {
-  color: #f4f7fb;
-  background: #090b10;
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #07111f;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   margin: 0;
+  display: flex;
+  place-items: center;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
+canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  outline: none;
+}
+
+.model-selector {
+  position: fixed;
+  top: 16px;
+  left: 16px;
+  background: rgba(13, 25, 48, 0.85);
+  backdrop-filter: blur(12px);
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  z-index: 100;
+  min-width: 120px;
+  /* 添加动态缩放 */
+  transform: scale(var(--ui-scale, 1));
+  transform-origin: top left;
+  pointer-events: auto;
+}
+
+.ui-title {
+  font-size: 11px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  color: #7e9bcb;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  opacity: 0.8;
+}
+
+.ui-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 10px;
+  margin: 2px 0;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.2s ease;
+  color: #cbd5e1;
+}
+
+.ui-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.ui-item.active {
+  background: rgba(59, 130, 246, 0.15);
+  color: #6bd9ff;
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+.color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 8px;
+  box-shadow: 0 0 6px currentColor;
 }
