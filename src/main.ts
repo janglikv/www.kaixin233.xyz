@@ -10,20 +10,52 @@ const AIRFRAMES = [
   { id: 'frame1', name: '机体1', factory: createAirframe1 },
   { id: 'frame2', name: '机体2', factory: createAirframe2 },
 ]
+const VIEW_MODES = [
+  { id: 'preview', name: '预览' },
+  { id: 'game', name: '游戏' },
+] as const
+
+type ViewMode = typeof VIEW_MODES[number]['id']
+const PREVIEW_SCENE_SCALE = 1
+const GAME_SCENE_SCALE = 0.35
+const EXHAUST_BASE_SIZE = 5.0  // 大幅增加基础尺寸以还原厚实感
+const GAME_BANK_ANGLE = 0.52
+const GAME_BANK_LERP = 0.16
 
 
 // 2. 状态变量
 let currentFrameId = localStorage.getItem('selectedFrame') || AIRFRAMES[0].id
+let currentViewMode = (localStorage.getItem('viewMode') as ViewMode | null) || 'preview'
 let activeFighter: THREE.Group | null = null
 let activeExhaust: ExhaustParticleSystem[] = []
+let currentGameBank = 0
+const keysPressed: Record<string, boolean> = {}
+
+window.addEventListener('keydown', (e) => { keysPressed[e.key.toLowerCase()] = true })
+window.addEventListener('keyup', (e) => { keysPressed[e.key.toLowerCase()] = false })
 
 // 3. 基础场景设置
 const scene = new THREE.Scene()
 scene.background = new THREE.Color('#07111f')
 scene.fog = new THREE.Fog('#0d1930', 20, 50)
+const sceneContent = new THREE.Group()
+scene.add(sceneContent)
 
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 200)
-camera.position.set(6, 4, 12)
+// 边界可视化 (添加到 scene，由 handleResize 动态更新几何)
+const boundaryBox = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: 0xff0000 }))
+boundaryBox.visible = false
+scene.add(boundaryBox)
+
+const aspect = window.innerWidth / window.innerHeight
+const frustumSize = 25
+const camera = new THREE.OrthographicCamera(
+  frustumSize * aspect / -2, frustumSize * aspect / 2,
+  frustumSize / 2, frustumSize / -2,
+  0.1, 1000
+)
+camera.position.set(0, 10, 0)
+camera.up.set(-1, 0, 0)
+camera.lookAt(0, 0, 0)
 
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -33,23 +65,47 @@ document.body.appendChild(renderer.domElement)
 
 const controls = new OrbitControls(camera, renderer.domElement)
 controls.enableDamping = true; controls.dampingFactor = 0.05
-controls.minDistance = 5; controls.maxDistance = 35
+controls.minDistance = 10; controls.maxDistance = 40
+controls.enableRotate = false // 禁用旋转以保持 2D 视角
+
+
+const syncCameraMode = () => {
+  const isGameMode = currentViewMode === 'game'
+  controls.enabled = !isGameMode
+  
+  if (isGameMode) {
+    camera.up.set(-1, 0, 0)
+    camera.position.set(0, 10, 0)
+    camera.zoom = 1
+  } else {
+    camera.up.set(0, 1, 0)
+    camera.position.set(6, 4, 12)
+    camera.zoom = 1 // 预览模式可以根据需要调整 zoom
+  }
+
+  controls.target.set(0, 0, 0)
+  camera.lookAt(controls.target)
+  camera.updateProjectionMatrix()
+  controls.update()
+}
 
 // 4. 切换机体函数
 const loadFrame = (id: string) => {
-  if (activeFighter) scene.remove(activeFighter)
+  if (activeFighter) sceneContent.remove(activeFighter)
   
   const config = AIRFRAMES.find(f => f.id === id) || AIRFRAMES[0]
   const { fighter, exhaustParticles } = config.factory()
   
   fighter.scale.setScalar(1.2)
-  scene.add(fighter)
+  sceneContent.add(fighter)
   
   activeFighter = fighter
   activeExhaust = exhaustParticles
   currentFrameId = id
   localStorage.setItem('selectedFrame', id)
   
+  syncExhaustVisualScale()
+  syncFighterOrientation()
   updateUI()
 }
 
@@ -57,6 +113,53 @@ const loadFrame = (id: string) => {
 const ui = document.createElement('div')
 ui.className = 'model-selector'
 document.body.appendChild(ui)
+
+const modeToggle = document.createElement('div')
+modeToggle.className = 'view-mode-toggle'
+document.body.appendChild(modeToggle)
+
+const fpsPanel = document.createElement('div')
+fpsPanel.className = 'fps-panel'
+fpsPanel.textContent = 'FPS 0'
+document.body.appendChild(fpsPanel)
+
+const syncExhaustVisualScale = () => {
+  const isGameMode = currentViewMode === 'game'
+  // 在游戏模式下，虽然场景缩小了，但我们要维持粒子的视觉厚度
+  const exhaustScale = isGameMode ? GAME_SCENE_SCALE * 1.5 : PREVIEW_SCENE_SCALE
+  
+  activeExhaust.forEach((sys) => {
+    const material = sys.points.material as THREE.PointsMaterial
+    material.size = EXHAUST_BASE_SIZE * exhaustScale
+    material.needsUpdate = true
+  })
+}
+
+const syncFighterOrientation = () => {
+  if (!activeFighter) return
+  // 游戏模式下绕机头方向滚转，做出压机翼的侧倾效果
+  activeFighter.rotation.set(0, 0, 0)
+  activeFighter.rotation.x = currentViewMode === 'game' ? currentGameBank : 0
+}
+
+const applyViewMode = () => {
+  const isGameMode = currentViewMode === 'game'
+  ui.classList.toggle('is-hidden', isGameMode)
+  sceneContent.scale.setScalar(isGameMode ? GAME_SCENE_SCALE : PREVIEW_SCENE_SCALE)
+  
+  // 边界可视化开关
+  boundaryBox.visible = isGameMode
+
+  if (activeFighter) {
+    activeFighter.position.set(0, 0, 0)
+  }
+  currentGameBank = 0
+
+  syncExhaustVisualScale()
+  syncFighterOrientation()
+  syncCameraMode()
+  localStorage.setItem('viewMode', currentViewMode)
+}
 
 const updateUI = () => {
   ui.innerHTML = `
@@ -76,33 +179,64 @@ const updateUI = () => {
   })
 }
 
-// 环境物体
-const cloudMaterial = new THREE.MeshStandardMaterial({ color: '#d8e6ff', flatShading: true, transparent: true, opacity: 0.72, roughness: 1 })
-const createCloud = (pos: THREE.Vector3Tuple, s: number) => {
-  const g = new THREE.Group(); const pGeom = new THREE.IcosahedronGeometry(0.55, 0)
-  ;[[-0.9,0,0],[-0.25,0.18,0.08],[0.45,0.08,-0.05],[1.0,-0.02,0.03]].forEach(([x,y,z], i) => {
-    const p = new THREE.Mesh(pGeom, cloudMaterial); p.position.set(x,y,z); p.scale.setScalar(i%2===0?1:0.9); g.add(p)
-  })
-  g.position.set(...pos); g.scale.setScalar(s); scene.add(g)
-}
-createCloud([-8.2,4.5,-8], 1.15); createCloud([8.3,3.8,-9], 1.05); createCloud([6.4,-1.4,-11], 0.82)
+const updateModeToggle = () => {
+  modeToggle.innerHTML = VIEW_MODES.map(mode => `
+    <button class="mode-chip ${mode.id === currentViewMode ? 'active' : ''}" data-mode="${mode.id}" type="button">
+      ${mode.name}
+    </button>
+  `).join('')
 
-const stars = new THREE.Points(new THREE.BufferGeometry(), new THREE.PointsMaterial({ color: '#d8ebff', size: 0.085, sizeAttenuation: true }))
-const starPos = new Float32Array(220 * 3)
-for (let i=0; i<220; i++) {
-  const s = i * 3; starPos[s] = (Math.random()-0.5)*64; starPos[s+1] = Math.random()*32-8; starPos[s+2] = -Math.random()*40-10
+  modeToggle.querySelectorAll<HTMLButtonElement>('.mode-chip').forEach(button => {
+    button.addEventListener('click', () => {
+      const mode = button.dataset.mode as ViewMode | undefined
+      if (!mode || mode === currentViewMode) return
+      currentViewMode = mode
+      applyViewMode()
+      updateModeToggle()
+    })
+  })
 }
-stars.geometry.setAttribute('position', new THREE.BufferAttribute(starPos, 3)); scene.add(stars)
 
 scene.add(new THREE.AmbientLight('#7e9bcb', 1.2))
 const moonLight = new THREE.DirectionalLight('#d8e8ff', 1.75); moonLight.position.set(-6,8,6); scene.add(moonLight)
 const rimLight = new THREE.DirectionalLight('#45b8ff', 1.2); rimLight.position.set(8,1,-8); scene.add(rimLight)
 
 loadFrame(currentFrameId)
+updateModeToggle()
+applyViewMode()
+
+// 边界状态
+let screenBoundX = 12.5
+let screenBoundZ = 12.5
+let lastFpsSampleTime = performance.now()
+let frameCount = 0
 
 const handleResize = () => {
   const w = window.innerWidth; const h = window.innerHeight
-  camera.aspect = w / h; camera.updateProjectionMatrix(); renderer.setSize(w, h)
+  const aspect = w / h
+  const frustumSize = 25
+  
+  camera.left = -frustumSize * aspect / 2
+  camera.right = frustumSize * aspect / 2
+  camera.top = frustumSize / 2
+  camera.bottom = -frustumSize / 2
+  camera.updateProjectionMatrix()
+  
+  // 更新边界数值
+  screenBoundX = frustumSize / 2
+  screenBoundZ = (frustumSize * aspect) / 2
+
+  // 更新红框几何体
+  const pts = [
+    new THREE.Vector3(-screenBoundX, 0, -screenBoundZ),
+    new THREE.Vector3(screenBoundX, 0, -screenBoundZ),
+    new THREE.Vector3(screenBoundX, 0, screenBoundZ),
+    new THREE.Vector3(-screenBoundX, 0, screenBoundZ),
+    new THREE.Vector3(-screenBoundX, 0, -screenBoundZ)
+  ]
+  boundaryBox.geometry.setFromPoints(pts)
+  
+  renderer.setSize(w, h)
   const uiScale = Math.max(0.6, Math.min(1.4, w / 1440))
   document.documentElement.style.setProperty('--ui-scale', uiScale.toString())
 }
@@ -110,9 +244,45 @@ window.addEventListener('resize', handleResize); handleResize()
 
 const render = () => {
   const elapsed = performance.now() * 0.001
+  frameCount += 1
+  const now = performance.now()
+  if (now - lastFpsSampleTime >= 250) {
+    const fps = Math.round((frameCount * 1000) / (now - lastFpsSampleTime))
+    fpsPanel.textContent = `FPS ${fps}`
+    frameCount = 0
+    lastFpsSampleTime = now
+  }
+
   if (activeFighter) {
-    activeFighter.position.y = Math.sin(elapsed * 0.5) * 0.15
-    activeFighter.rotation.z = Math.sin(elapsed * 0.3) * 0.05
+    if (currentViewMode === 'game') {
+      // WASD 移动逻辑
+      const speed = 0.4
+      if (keysPressed['w'] || keysPressed['arrowup']) activeFighter.position.x -= speed
+      if (keysPressed['s'] || keysPressed['arrowdown']) activeFighter.position.x += speed
+      if (keysPressed['a'] || keysPressed['arrowleft']) activeFighter.position.z += speed
+      if (keysPressed['d'] || keysPressed['arrowright']) activeFighter.position.z -= speed
+
+      const movingLeft = keysPressed['a'] || keysPressed['arrowleft']
+      const movingRight = keysPressed['d'] || keysPressed['arrowright']
+      const targetBank = movingLeft === movingRight ? 0 : movingLeft ? GAME_BANK_ANGLE : -GAME_BANK_ANGLE
+      currentGameBank += (targetBank - currentGameBank) * GAME_BANK_LERP
+
+      // 动态边界限制 (留出一点边距)
+      const margin = 1.2
+      const limitX = screenBoundX / GAME_SCENE_SCALE - margin
+      const limitZ = screenBoundZ / GAME_SCENE_SCALE - margin
+      activeFighter.position.x = Math.max(-limitX, Math.min(limitX, activeFighter.position.x))
+      activeFighter.position.z = Math.max(-limitZ, Math.min(limitZ, activeFighter.position.z))
+
+      activeFighter.position.y = 0
+      activeFighter.rotation.set(currentGameBank, 0, 0)
+    } else {
+      currentGameBank = 0
+      activeFighter.position.y = Math.sin(elapsed * 0.5) * 0.15
+      activeFighter.rotation.x = 0
+      activeFighter.rotation.y = 0
+      activeFighter.rotation.z = Math.sin(elapsed * 0.3) * 0.05
+    }
   }
   activeExhaust.forEach((sys) => {
     const pos = sys.points.geometry.attributes.position.array as Float32Array
